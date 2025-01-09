@@ -2,13 +2,13 @@ import { Token } from '@lumino/coreutils';
 
 import { ISignal } from '@lumino/signaling';
 
-import SW_URL from '!!file-loader?name=[name]-[contenthash:7].[ext]&context=.!./service-worker';
+import SW_URL from './service-worker?text';
 
 /**
  * The token for the ServiceWorker.
  */
 export const IServiceWorkerManager = new Token<IServiceWorkerManager>(
-  '@jupyterlite/server-extension:IServiceWorkerManager'
+  '@jupyterlite/server-extension:IServiceWorkerManager',
 );
 
 /**
@@ -32,6 +32,21 @@ export interface IServiceWorkerManager {
    * A Promise that resolves when the ServiceWorker is registered, or rejects if it cannot
    */
   ready: Promise<void>;
+}
+
+/**
+ * A namespace for `ServiceWorkerManager` class.
+ */
+export namespace IServiceWorkerManager {
+  /**
+   * An options object for initializing a worker manager.
+   */
+  export interface IOptions {
+    /**
+     * URL to load the worker file. Default to "{baseURL}/service-worker.js"
+     */
+    workerUrl?: string;
+  }
 }
 
 export const WORKER_NAME = `${SW_URL}`.split('/').slice(-1)[0];

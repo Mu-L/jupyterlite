@@ -8,23 +8,23 @@ import {
   ILabShell,
 } from '@jupyterlab/application';
 
-import { Clipboard, ICommandPalette, Dialog, showDialog } from '@jupyterlab/apputils';
+import {
+  Clipboard,
+  ICommandPalette,
+  Dialog,
+  showDialog,
+  SessionContext,
+} from '@jupyterlab/apputils';
 
 import { PageConfig, URLExt } from '@jupyterlab/coreutils';
 
-import { IDocumentManager } from '@jupyterlab/docmanager';
-
-import {
-  IDocumentProvider,
-  IDocumentProviderFactory,
-  ProviderMock,
-} from '@jupyterlab/docprovider';
+import { IDocumentManager, IDocumentWidgetOpener } from '@jupyterlab/docmanager';
 
 import { IFileBrowserFactory } from '@jupyterlab/filebrowser';
 
 import { IMainMenu } from '@jupyterlab/mainmenu';
 
-import { Contents } from '@jupyterlab/services';
+import { ISettingRegistry } from '@jupyterlab/settingregistry';
 
 import { ITranslator } from '@jupyterlab/translation';
 
@@ -32,28 +32,21 @@ import { downloadIcon, linkIcon } from '@jupyterlab/ui-components';
 
 import { liteIcon, liteWordmark } from '@jupyterlite/ui-components';
 
-import { filter, toArray } from '@lumino/algorithm';
+import { filter } from '@lumino/algorithm';
 
 import { Widget } from '@lumino/widgets';
-
-import { getParam } from 'lib0/environment';
 
 import React from 'react';
 
 /**
- * The default notebook factory.
- */
-const NOTEBOOK_FACTORY = 'Notebook';
-
-/**
- * The editor factory.
- */
-const EDITOR_FACTORY = 'Editor';
-
-/**
  * A regular expression to match path to notebooks, documents and consoles
  */
-const URL_PATTERN = new RegExp('/(lab|notebooks|edit|consoles)\\/?');
+const URL_PATTERN = new RegExp('/(lab|tree|notebooks|edit|consoles)\\/?');
+
+/**
+ * The JupyterLab document manager plugin id.
+ */
+const JUPYTERLAB_DOCMANAGER_PLUGIN_ID = '@jupyterlab/docmanager-extension:plugin';
 
 /**
  * The command IDs used by the application extension.
@@ -86,7 +79,7 @@ const about: JupyterFrontEndPlugin<void> = {
     app: JupyterFrontEnd,
     translator: ITranslator,
     palette: ICommandPalette | null,
-    menu: IMainMenu | null
+    menu: IMainMenu | null,
   ): void => {
     const { commands } = app;
     const trans = translator.load(I18N_BUNDLE);
@@ -170,38 +163,6 @@ const about: JupyterFrontEndPlugin<void> = {
 };
 
 /**
- * An alternative document provider plugin
- */
-const docProviderPlugin: JupyterFrontEndPlugin<IDocumentProviderFactory> = {
-  id: '@jupyterlite/application-extension:docprovider',
-  provides: IDocumentProviderFactory,
-  requires: [ITranslator],
-  activate: (
-    app: JupyterFrontEnd,
-    translator: ITranslator
-  ): IDocumentProviderFactory => {
-    const collaborative = PageConfig.getOption('collaborative') === 'true';
-    const factory = (options: IDocumentProviderFactory.IOptions): IDocumentProvider => {
-      if (collaborative) {
-        const trans = translator.load(I18N_BUNDLE);
-        console.warn(
-          trans.__(
-            'The `collaborative` feature was enabled, but no docprovider is available.'
-          )
-        );
-        console.info(
-          trans.__(
-            'Install `jupyterlab-webrtc-docprovider` to enable WebRTC-based collaboration.'
-          )
-        );
-      }
-      return new ProviderMock();
-    };
-    return factory;
-  },
-};
-
-/**
  * A plugin providing download commands in the file menu and command palette.
  */
 const downloadPlugin: JupyterFrontEndPlugin<void> = {
@@ -214,7 +175,7 @@ const downloadPlugin: JupyterFrontEndPlugin<void> = {
     translator: ITranslator,
     docManager: IDocumentManager,
     palette: ICommandPalette | null,
-    factory: IFileBrowserFactory | null
+    factory: IFileBrowserFactory | null,
   ) => {
     const trans = translator.load(I18N_BUNDLE);
     const { commands, serviceManager, shell } = app;
@@ -228,22 +189,29 @@ const downloadPlugin: JupyterFrontEndPlugin<void> = {
     const downloadContent = async (contentPath: string, fileName: string) => {
       const model = await contents.get(contentPath, { content: true });
       const element = document.createElement('a');
-      if (model.type === 'notebook' || model.format === 'json') {
+      if (
+        model.type === 'notebook' ||
+        model.format === 'json' ||
+        model.mimetype === 'text/json'
+      ) {
         const mime = model.mimetype ?? 'text/json';
         const content = JSON.stringify(model.content, null, 2);
         element.href = `data:${mime};charset=utf-8,${encodeURIComponent(content)}`;
-      } else if (model.type === 'file') {
-        if (model.format === 'base64') {
-          const mime = model.mimetype ?? 'application/octet-stream';
-          element.href = `data:${mime};base64,${model.content}`;
-        } else {
-          const mime = model.mimetype ?? 'text/plain';
-          element.href = `data:${mime};charset=utf-8,${encodeURIComponent(
-            model.content
-          )}`;
-        }
+      } else if (model.format === 'text' || model.mimetype === 'text/plain') {
+        const mime = model.mimetype ?? 'text/plain';
+        element.href = `data:${mime};charset=utf-8,${encodeURIComponent(
+          model.content,
+        )}`;
+      } else if (
+        model.format === 'base64' ||
+        model.mimetype === 'application/octet-stream'
+      ) {
+        const mime = model.mimetype ?? 'application/octet-stream';
+        element.href = `data:${mime};base64,${model.content}`;
       } else {
-        throw new Error(`Content whose type is "${model.type}" cannot be downloaded`);
+        throw new Error(
+          `Content whose mimetype is "${model.mimetype}" cannot be downloaded`,
+        );
       }
       element.download = fileName;
       document.body.appendChild(element);
@@ -270,7 +238,15 @@ const downloadPlugin: JupyterFrontEndPlugin<void> = {
           });
         }
         await context.save();
-        await downloadContent(context.path, context.path);
+        try {
+          await downloadContent(context.path, context.path);
+        } catch (e) {
+          return showDialog({
+            title: trans.__('Cannot Download'),
+            body: JSON.stringify(e),
+            buttons: [Dialog.okButton({ label: trans.__('OK') })],
+          });
+        }
       },
     });
 
@@ -290,12 +266,19 @@ const downloadPlugin: JupyterFrontEndPlugin<void> = {
           if (!widget) {
             return;
           }
-          const selected = toArray(widget.selectedItems());
-          selected.forEach(async (item: Contents.IModel) => {
-            if (item.type === 'directory') {
-              return;
+          const selected = Array.from(widget.selectedItems());
+          selected.forEach(async (item) => {
+            if (item.type !== 'directory') {
+              try {
+                await downloadContent(item.path, item.name);
+              } catch (e) {
+                return showDialog({
+                  title: trans.__('Cannot Download'),
+                  body: JSON.stringify(e),
+                  buttons: [Dialog.okButton({ label: trans.__('OK') })],
+                });
+              }
             }
-            await downloadContent(item.path, item.name);
           });
         },
         icon: downloadIcon.bindprops({ stylesheet: 'menuItem' }),
@@ -310,7 +293,7 @@ const downloadPlugin: JupyterFrontEndPlugin<void> = {
  */
 const liteLogo: JupyterFrontEndPlugin<void> = {
   id: '@jupyterlite/application-extension:logo',
-  // marking as optional to not throw errors in retro
+  // marking as optional to not throw errors in Notebook
   optional: [ILabShell],
   autoStart: true,
   activate: (app: JupyterFrontEnd, labShell: ILabShell) => {
@@ -354,14 +337,15 @@ const opener: JupyterFrontEndPlugin<void> = {
   id: '@jupyterlite/application-extension:opener',
   autoStart: true,
   requires: [IRouter, IDocumentManager],
-  optional: [ILabShell],
+  optional: [ILabShell, ISettingRegistry],
   activate: (
     app: JupyterFrontEnd,
     router: IRouter,
     docManager: IDocumentManager,
-    labShell: ILabShell | null
+    labShell: ILabShell | null,
+    settingRegistry: ISettingRegistry | null,
   ): void => {
-    const { commands } = app;
+    const { commands, docRegistry } = app;
 
     const command = 'router:tree';
     commands.addCommand(command, {
@@ -376,49 +360,79 @@ const opener: JupyterFrontEndPlugin<void> = {
 
         const urlParams = new URLSearchParams(search);
         const paths = urlParams.getAll('path');
-        if (!paths) {
+        if (paths.length === 0) {
           return;
         }
         const files = paths.map((path) => decodeURIComponent(path));
-        app.restored.then(() => {
-          const page = PageConfig.getOption('retroPage');
+        app.started.then(async () => {
+          const page = PageConfig.getOption('notebookPage');
           const [file] = files;
-          switch (page) {
-            case 'consoles': {
-              commands.execute('console:create', { path: file });
-              return;
+          if (page === 'tree') {
+            let appUrl = '/edit';
+            // check if the file is a notebook
+            const defaultFactory = docRegistry.defaultWidgetFactory(file);
+            if (defaultFactory.name === 'Notebook') {
+              appUrl = '/notebooks';
             }
-            case 'notebooks': {
-              docManager.open(file, NOTEBOOK_FACTORY, undefined, {
-                ref: '_noref',
-              });
-              return;
-            }
-            case 'edit': {
-              docManager.open(file, EDITOR_FACTORY, undefined, {
-                ref: '_noref',
-              });
-              return;
-            }
-            default: {
-              // open all files in the lab interface
-              files.forEach((file) => docManager.open(file));
-              const url = new URL(URLExt.join(PageConfig.getBaseUrl(), request));
-              // only remove the path (to keep extra parameters like the RTC room)
-              url.searchParams.delete('path');
-              const { pathname, search } = url;
-              router.navigate(`${pathname}${search}`, { skipRouting: true });
+            const baseUrl = PageConfig.getBaseUrl();
+            const url = new URL(URLExt.join(baseUrl, appUrl, 'index.html'));
+            url.searchParams.append('path', file);
 
-              if (labShell) {
-                // open the folder where the files are located on startup
-                const showInBrowser = () => {
-                  commands.execute('docmanager:show-in-file-browser');
-                  labShell.currentChanged.disconnect(showInBrowser);
-                };
+            // redirect to the proper page
+            window.location.href = url.toString();
+            return;
+          } else if (page === 'consoles') {
+            commands.execute('console:create', { path: file });
+            return;
+          } else if (page === 'notebooks' || page === 'edit') {
+            let defaultFactory = docRegistry.defaultWidgetFactory(file).name;
 
-                labShell.currentChanged.connect(showInBrowser);
-              }
-              break;
+            // Explicitly get the default viewers from the settings because
+            // JupyterLab might not have had the time to load the settings yet (race condition)
+            // Relevant code: https://github.com/jupyterlab/jupyterlab/blob/d56ff811f39b3c10c6d8b6eb27a94624b753eb53/packages/docmanager-extension/src/index.tsx#L265-L293
+            if (settingRegistry) {
+              const settings = await settingRegistry.load(
+                JUPYTERLAB_DOCMANAGER_PLUGIN_ID,
+              );
+              const defaultViewers = settings.get('defaultViewers').composite as {
+                [ft: string]: string;
+              };
+              // get the file types for the path
+              const types = docRegistry.getFileTypesForPath(file);
+              // for each file type, check if there is a default viewer and if it
+              // is available in the docRegistry. If it is the case, use it as the
+              // default factory
+              types.forEach((ft) => {
+                if (
+                  defaultViewers[ft.name] !== undefined &&
+                  docRegistry.getWidgetFactory(defaultViewers[ft.name])
+                ) {
+                  defaultFactory = defaultViewers[ft.name];
+                }
+              });
+            }
+
+            const factory = urlParams.get('factory') ?? defaultFactory;
+            docManager.open(file, factory, undefined, {
+              ref: '_noref',
+            });
+          } else {
+            // open all files in the lab interface
+            files.forEach((file) => docManager.open(file));
+            const url = new URL(URLExt.join(PageConfig.getBaseUrl(), request));
+            // only remove the path (to keep extra parameters like the RTC room)
+            url.searchParams.delete('path');
+            const { pathname, search } = url;
+            router.navigate(`${pathname}${search}`, { skipRouting: true });
+
+            if (labShell) {
+              // open the folder where the files are located on startup
+              const showInBrowser = () => {
+                commands.execute('docmanager:show-in-file-browser');
+                labShell.currentChanged.disconnect(showInBrowser);
+              };
+
+              labShell.currentChanged.connect(showInBrowser);
             }
           }
         });
@@ -426,6 +440,44 @@ const opener: JupyterFrontEndPlugin<void> = {
     });
 
     router.register({ command, pattern: URL_PATTERN });
+  },
+};
+
+/**
+ * A plugin to patch the session context path so it includes the drive name.
+ * TODO: investigate a better way for the kernel to be aware of the drive it is
+ * associated with.
+ */
+const sessionContextPatch: JupyterFrontEndPlugin<void> = {
+  id: '@jupyterlite/application-extension:session-context-patch',
+  autoStart: true,
+  requires: [IDocumentManager, IDocumentWidgetOpener],
+  activate: (
+    app: JupyterFrontEnd,
+    docManager: IDocumentManager,
+    widgetOpener: IDocumentWidgetOpener,
+  ) => {
+    const contents = app.serviceManager.contents;
+
+    widgetOpener.opened.connect((_, widget) => {
+      const context = docManager.contextForWidget(widget);
+      const driveName = contents.driveName(context?.path ?? '');
+      if (driveName === '') {
+        // do nothing if this is the default drive
+        return;
+      }
+      const sessionContext = widget.context.sessionContext as SessionContext;
+      // Path the session context to include the drive name
+      // In JupyterLab 3 the path used to contain the drive name as prefix, which was
+      // also part of the /api/sessions requests. Which allowed for knowing the drive associated
+      // with a kernel.
+      // This was changed in JupyterLab 4 in https://github.com/jupyterlab/jupyterlab/pull/14519
+      // and is needed for the kernel to be aware of the drive it is associated with.
+      // This is a temporary fix until a better solution is found upstream in JupyterLab ideally.
+      // This also avoid having to patch the downstream kernels (e.g. xeus-python and pyodide)
+      sessionContext['_name'] = context?.path;
+      sessionContext['_path'] = context?.path;
+    });
   },
 };
 
@@ -443,14 +495,11 @@ const shareFile: JupyterFrontEndPlugin<void> = {
   activate: (
     app: JupyterFrontEnd,
     factory: IFileBrowserFactory,
-    translator: ITranslator
+    translator: ITranslator,
   ): void => {
     const trans = translator.load(I18N_BUNDLE);
-    const { commands } = app;
+    const { commands, docRegistry } = app;
     const { tracker } = factory;
-
-    const roomName = getParam('--room', '').trim();
-    const collaborative = PageConfig.getOption('collaborative') === 'true' && roomName;
 
     commands.addCommand(CommandIDs.copyShareableLink, {
       execute: () => {
@@ -459,21 +508,39 @@ const shareFile: JupyterFrontEndPlugin<void> = {
           return;
         }
 
-        const url = new URL(URLExt.join(PageConfig.getBaseUrl(), 'lab'));
-        const models = toArray(
-          filter(widget.selectedItems(), (item) => item.type !== 'directory')
+        const baseUrl = PageConfig.getBaseUrl();
+        let appUrl = PageConfig.getOption('appUrl');
+
+        const models = Array.from(
+          filter(widget.selectedItems(), (item) => item.type !== 'directory'),
         );
+
+        if (!models.length) {
+          return;
+        }
+
+        // In the notebook application:
+        // - only copy the first element
+        // - open /notebooks if it's a notebook, /edit otherwise
+        if (appUrl === '/tree') {
+          const [model] = models;
+          const defaultFactory = docRegistry.defaultWidgetFactory(model.path);
+          if (defaultFactory.name === 'Notebook') {
+            appUrl = '/notebooks';
+          } else {
+            appUrl = '/edit';
+          }
+        }
+
+        const url = new URL(URLExt.join(baseUrl, appUrl, 'index.html'));
         models.forEach((model) => {
           url.searchParams.append('path', model.path);
         });
-        if (collaborative) {
-          url.searchParams.append('room', roomName);
-        }
         Clipboard.copyToSystem(url.href);
       },
       isVisible: () =>
         !!tracker.currentWidget &&
-        toArray(tracker.currentWidget.selectedItems()).length >= 1,
+        Array.from(tracker.currentWidget.selectedItems()).length >= 1,
       icon: linkIcon.bindprops({ stylesheet: 'menuItem' }),
       label: trans.__('Copy Shareable Link'),
     });
@@ -482,11 +549,11 @@ const shareFile: JupyterFrontEndPlugin<void> = {
 
 const plugins: JupyterFrontEndPlugin<any>[] = [
   about,
-  docProviderPlugin,
   downloadPlugin,
   liteLogo,
   notifyCommands,
   opener,
+  sessionContextPatch,
   shareFile,
 ];
 

@@ -1,11 +1,15 @@
 """a JupyterLite addon for supporting federated_extensions"""
+
 import json
 import re
 import sys
 import urllib.parse
 from pathlib import Path
 
+from traitlets import List, Unicode
+
 from ..constants import (
+    ALL_FEDERATED_JSON,
     FEDERATED_EXTENSIONS,
     JSON_FMT,
     JUPYTER_CONFIG_DATA,
@@ -18,14 +22,17 @@ from ..constants import (
 )
 from .base import BaseAddon
 
-# TODO: improve this
-ENV_EXTENSIONS = Path(sys.prefix) / SHARE_LABEXTENSIONS
-
 
 class FederatedExtensionAddon(BaseAddon):
     """sync the as-installed federated_extensions and update `jupyter-lite.json`"""
 
     __all__ = ["pre_build", "post_build", "post_init"]
+
+    labextensions_path = Path(sys.prefix) / SHARE_LABEXTENSIONS
+
+    extra_labextensions_path = List(
+        Unicode(), help="""Extra paths to look for federated JupyterLab extensions"""
+    ).tag(config=True)
 
     def env_extensions(self, root):
         """a list of all federated extensions"""
@@ -60,10 +67,12 @@ class FederatedExtensionAddon(BaseAddon):
 
     def pre_build(self, manager):
         """yield a doit task to copy each federated extension into the output_dir"""
-        root = ENV_EXTENSIONS
-
         if not self.is_sys_prefix_ignored():
-            for pkg_json in self.env_extensions(root):
+            for pkg_json in self.env_extensions(self.labextensions_path):
+                yield from self.copy_one_extension(pkg_json)
+
+        for p in self.extra_labextensions_path:
+            for pkg_json in self.env_extensions(Path(p)):
                 yield from self.copy_one_extension(pkg_json)
 
         for path_or_url in manager.federated_extensions:
@@ -86,9 +95,7 @@ class FederatedExtensionAddon(BaseAddon):
         stem = json.loads(pkg_json.read_text(**UTF8))["name"]
         dest = self.output_extensions / stem
         file_dep = [
-            p
-            for p in pkg_path.rglob("*")
-            if not (p.is_dir() or self.is_ignored_sourcemap(p.name))
+            p for p in pkg_path.rglob("*") if not (p.is_dir() or self.is_ignored_sourcemap(p.name))
         ]
         targets = [dest / p.relative_to(pkg_path) for p in file_dep]
 
@@ -100,7 +107,8 @@ class FederatedExtensionAddon(BaseAddon):
         )
 
     def resolve_one_extension(self, path_or_url, init):
-        """yield tasks try to resolve one URL or local folder/archive as a (set of) federated_extension(s)"""
+        """yield tasks try to resolve one URL or local folder/archive
+        as a (set of) federated_extension(s)"""
         if re.findall(r"^https?://", path_or_url):
             url = urllib.parse.urlparse(path_or_url)
             name = url.path.split("/")[-1]
@@ -172,13 +180,9 @@ class FederatedExtensionAddon(BaseAddon):
 
     def copy_all_federated_extensions(self, unarchived):
         """actually copy all federated extensions found in a folder."""
-        for simple_pkg_json in unarchived.rglob(
-            f"{SHARE_LABEXTENSIONS}/*/package.json"
-        ):
+        for simple_pkg_json in unarchived.rglob(f"{SHARE_LABEXTENSIONS}/*/package.json"):
             self.copy_one_federated_extension(simple_pkg_json)
-        for org_pkg_json in unarchived.rglob(
-            f"{SHARE_LABEXTENSIONS}/@*/*/package.json"
-        ):
+        for org_pkg_json in unarchived.rglob(f"{SHARE_LABEXTENSIONS}/@*/*/package.json"):
             self.copy_one_federated_extension(org_pkg_json)
 
     def copy_one_federated_extension(self, pkg_json):
@@ -187,7 +191,8 @@ class FederatedExtensionAddon(BaseAddon):
 
         if self.is_prebuilt(pkg_data):
             pkg_name = pkg_data["name"]
-            self.copy_one(pkg_json.parent, self.output_extensions / f"{pkg_name}")
+            output_pkg = self.output_extensions / pkg_name
+            self.copy_one(pkg_json.parent, output_pkg)
 
     def is_prebuilt(self, pkg_json):
         """verify this is an actual pre-built extension, containing load information"""
@@ -281,6 +286,54 @@ class FederatedExtensionAddon(BaseAddon):
                 targets=targets,
                 actions=[(self.copy_one, [theme_dir, dest])],
             )
+
+        app_schemas = manager.output_dir / "build" / "schemas"
+        all_federated_json = app_schemas / ALL_FEDERATED_JSON
+
+        if app_schemas.is_dir():
+            yield self.task(
+                name="settings",
+                doc=f"ensure {ALL_FEDERATED_JSON} includes the settings of federated extensions",
+                file_dep=[*lab_extensions],
+                targets=[all_federated_json],
+                actions=[
+                    (self.ensure_federated_settings, [manager, lab_extensions, all_federated_json])
+                ],
+            )
+
+    def ensure_federated_settings(self, manager, lab_extensions, all_federated_json):
+        """ensure settings from federated extensions are aggregated in a single file"""
+        all_federated_settings = [
+            setting for p in lab_extensions for setting in self.get_federated_settings(p.parent)
+        ]
+        all_federated_json.write_text(json.dumps(all_federated_settings), **UTF8)
+
+    def get_federated_settings(self, extension):
+        """get the settings for a federated extension"""
+        pkg_json = extension / PACKAGE_JSON
+        pkg_data = json.loads(pkg_json.read_text(**UTF8))
+        settings_dir = extension / "schemas"
+        if not settings_dir.is_dir():
+            # bail if there is no settings for that extension
+            return []
+        setting_files = sorted(settings_dir.rglob("*.json"))
+
+        pkg_name = pkg_data["name"]
+        pkg_version = pkg_data["version"]
+        all_settings = []
+        for setting_file in setting_files:
+            plugin_id = f"{pkg_name}:{setting_file.stem}"
+            schema = json.loads(setting_file.read_text(**UTF8))
+            setting = {
+                "id": plugin_id,
+                "raw": "{}",
+                "schema": schema,
+                "settings": {},
+                "version": pkg_version,
+            }
+            all_settings.append(setting)
+
+        return all_settings
 
     def patch_jupyterlite_json(self, jupyterlite_json):
         """add the federated_extensions to jupyter-lite.json

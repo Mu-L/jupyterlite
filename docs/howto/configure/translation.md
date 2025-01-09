@@ -27,7 +27,25 @@ jupyterlab-language-pack-fr-FR
 jupyterlab-language-pack-zh-CN
 ```
 
-And then rebuild the website with `jupyter lite build`.
+Also make sure you have the `jupyterlab_server` dependency installed in your build
+environment. `jupyterlab_server` is used by the `jupyter-lite` CLI to find and install
+language packs.
+
+You can install it by adding it to your `requirements.txt` alongside other dependencies:
+
+```text
+jupyterlab-language-pack-fr-FR
+jupyterlab-language-pack-zh-CN
+jupyterlab_server
+```
+
+Or by installing `jupyterlite-core` with `translation` extras:
+
+```
+pip install jupyterlite-core[translation]
+```
+
+Then rebuild the website with `jupyter lite build`.
 
 ## Changing the display language
 
@@ -39,7 +57,7 @@ JupyterLab:
 All of the core JupyterLite [apps](../../quickstart/using.md#applications) support
 localization:
 
-![a screencast of selecting localization from the help menu](https://user-images.githubusercontent.com/591645/134638710-e99b9710-af61-43e0-856b-cb383b8e8181.gif 'JupyterLite and RetroLite localization')
+![a screencast of selecting localization from the help menu](https://user-images.githubusercontent.com/591645/134638710-e99b9710-af61-43e0-856b-cb383b8e8181.gif 'JupyterLab and Jupyter Notebook localization')
 
 ## Ignoring language packs from the environment
 

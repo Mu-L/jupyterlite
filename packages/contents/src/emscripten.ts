@@ -24,8 +24,8 @@ export const SEEK_END = 2;
 
 export interface IStats {
   dev: number;
-  ino: number;
-  mode: number;
+  ino?: number;
+  mode?: number;
   nlink: number;
   uid: number;
   gid: number;
@@ -33,9 +33,9 @@ export interface IStats {
   size: number;
   blksize: number;
   blocks: number;
-  atime: Date;
-  mtime: Date;
-  ctime: Date;
+  atime: Date | string;
+  mtime: Date | string;
+  ctime: Date | string;
   timestamp?: number;
 }
 
@@ -57,22 +57,39 @@ export interface IEmscriptenStream {
   position: number;
 }
 
+export function instanceOfStream(
+  nodeOrStream: IEmscriptenFSNode | IEmscriptenStream,
+): nodeOrStream is IEmscriptenStream {
+  return 'node' in nodeOrStream;
+}
+
 export interface IEmscriptenNodeOps {
-  getattr(node: IEmscriptenFSNode): IStats;
-  setattr(node: IEmscriptenFSNode, attr: IStats): void;
-  lookup(parent: IEmscriptenFSNode, name: string): IEmscriptenFSNode;
+  getattr(node: IEmscriptenFSNode | IEmscriptenStream): IStats;
+  setattr(node: IEmscriptenFSNode | IEmscriptenStream, attr: IStats): void;
+  lookup(
+    parent: IEmscriptenFSNode | IEmscriptenStream,
+    name: string,
+  ): IEmscriptenFSNode;
   mknod(
-    parent: IEmscriptenFSNode,
+    parent: IEmscriptenFSNode | IEmscriptenStream,
     name: string,
     mode: number,
-    dev: number
+    dev: number,
   ): IEmscriptenFSNode;
-  rename(oldNode: IEmscriptenFSNode, newDir: IEmscriptenFSNode, newName: string): void;
-  unlink(parent: IEmscriptenFSNode, name: string): void;
-  rmdir(parent: IEmscriptenFSNode, name: string): void;
-  readdir(node: IEmscriptenFSNode): string[];
-  symlink(parent: IEmscriptenFSNode, newName: string, oldPath: string): void;
-  readlink(node: IEmscriptenFSNode): string;
+  rename(
+    oldNode: IEmscriptenFSNode | IEmscriptenStream,
+    newDir: IEmscriptenFSNode | IEmscriptenStream,
+    newName: string,
+  ): void;
+  unlink(parent: IEmscriptenFSNode | IEmscriptenStream, name: string): void;
+  rmdir(parent: IEmscriptenFSNode | IEmscriptenStream, name: string): void;
+  readdir(node: IEmscriptenFSNode | IEmscriptenStream): string[];
+  symlink(
+    parent: IEmscriptenFSNode | IEmscriptenStream,
+    newName: string,
+    oldPath: string,
+  ): void;
+  readlink(node: IEmscriptenFSNode | IEmscriptenStream): string;
 }
 
 export interface IEmscriptenStreamOps {
@@ -83,14 +100,14 @@ export interface IEmscriptenStreamOps {
     buffer: Uint8Array,
     offset: number,
     length: number,
-    position: number
+    position: number,
   ): number;
   write(
     stream: IEmscriptenStream,
     buffer: Uint8Array,
     offset: number,
     length: number,
-    position: number
+    position: number,
   ): number;
   llseek(stream: IEmscriptenStream, offset: number, whence: number): number;
 }
@@ -104,7 +121,7 @@ export type FS = EmscriptenFS & {
     parent: IEmscriptenFSNode | null,
     name: string,
     mode: number,
-    dev: number
+    dev: number,
   ) => IEmscriptenFSNode;
 };
 

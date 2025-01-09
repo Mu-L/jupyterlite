@@ -39,7 +39,7 @@ const buttons: JupyterFrontEndPlugin<void> = {
   activate: (
     app: JupyterFrontEnd,
     translator: ITranslator,
-    tracker: IConsoleTracker | null
+    tracker: IConsoleTracker | null,
   ) => {
     if (!tracker) {
       return;
@@ -131,7 +131,7 @@ const consolePlugin: JupyterFrontEndPlugin<void> = {
   activate: (
     app: JupyterFrontEnd,
     tracker: IConsoleTracker | null,
-    themeManager: IThemeManager | null
+    themeManager: IThemeManager | null,
   ) => {
     if (!tracker) {
       return;
@@ -141,6 +141,7 @@ const consolePlugin: JupyterFrontEndPlugin<void> = {
     const search = window.location.search;
     const urlParams = new URLSearchParams(search);
     const code = urlParams.getAll('code');
+    const execute = urlParams.get('execute');
     const kernel = urlParams.get('kernel') || undefined;
     const theme = urlParams.get('theme')?.trim();
     const toolbar = urlParams.get('toolbar');
@@ -164,7 +165,12 @@ const consolePlugin: JupyterFrontEndPlugin<void> = {
 
       if (code) {
         await console.sessionContext.ready;
-        code.forEach((line) => console.inject(line));
+        if (execute === '0') {
+          const codeContent = code.join('\n');
+          console.replaceSelection(codeContent);
+        } else {
+          code.forEach((line) => console.inject(line));
+        }
       }
     });
   },

@@ -6,6 +6,8 @@
 // And from https://github.com/gzuidhof/starboard-notebook
 
 // LICENSE: https://github.com/gzuidhof/starboard-notebook/blob/cd8d3fc30af4bd29cdd8f6b8c207df8138f5d5dd/LICENSE
+import { Contents } from '@jupyterlab/services';
+
 import {
   FS,
   ERRNO_CODES,
@@ -14,6 +16,7 @@ import {
   SEEK_CUR,
   SEEK_END,
   IEmscriptenStream,
+  instanceOfStream,
   IEmscriptenStreamOps,
   IEmscriptenNodeOps,
   IEmscriptenFSNode,
@@ -40,24 +43,82 @@ export type TDriveMethod =
   | 'put';
 
 /**
- * Interface of a request on the /api/drive endpoint
+ * Type of the data argument for the drive request, based on the request name
  */
-export interface IDriveRequest {
+export type TDriveData = {
+  rename: {
+    /**
+     * The new path for the file
+     */
+    newPath: string;
+  };
+  mknod: {
+    /**
+     * The mode of the file to create
+     */
+    mode: number;
+  };
+  put: {
+    /**
+     * The file content to write
+     */
+    data: any;
+
+    /**
+     * The file content format
+     */
+    format: Contents.FileFormat;
+  };
+};
+
+/**
+ * Drive request
+ */
+export type TDriveRequest<T extends TDriveMethod> = {
   /**
    * The method of the request (rmdir, readdir etc)
    */
-  method: TDriveMethod;
+  method: T;
+
+  /**
+   * The expected receiver of the request
+   */
+  receiver?: 'broadcast.ts';
 
   /**
    * The path to the file/directory for which the request was sent
    */
   path: string;
+} & (T extends keyof TDriveData ? { data: TDriveData[T] } : object);
 
-  /**
-   * Extra data on the request
-   */
-  data?: any;
-}
+type TDriveResponses = {
+  readdir: string[];
+  rmdir: null;
+  rename: null;
+  getmode: number;
+  lookup: DriveFS.ILookup;
+  mknod: null;
+  getattr: IStats;
+  get:
+    | {
+        /**
+         * The returned file content
+         */
+        content: any;
+
+        /**
+         * The content format
+         */
+        format: Contents.FileFormat;
+      }
+    | undefined;
+  put: null;
+};
+
+/**
+ * Drive response
+ */
+export type TDriveResponse<T extends TDriveMethod> = TDriveResponses[T];
 
 // Mapping flag -> do we need to overwrite the file upon closing it
 const flagNeedsWrite: { [flag: number]: boolean } = {
@@ -134,7 +195,7 @@ export class DriveFSEmscriptenStreamOps implements IEmscriptenStreamOps {
     buffer: Uint8Array,
     offset: number,
     length: number,
-    position: number
+    position: number,
   ): number {
     if (
       length <= 0 ||
@@ -154,7 +215,7 @@ export class DriveFSEmscriptenStreamOps implements IEmscriptenStreamOps {
     buffer: Uint8Array,
     offset: number,
     length: number,
-    position: number
+    position: number,
   ): number {
     if (length <= 0 || stream.file === undefined) {
       return 0;
@@ -202,7 +263,17 @@ export class DriveFSEmscriptenNodeOps implements IEmscriptenNodeOps {
     this.fs = fs;
   }
 
-  getattr(node: IEmscriptenFSNode): IStats {
+  protected node(
+    nodeOrStream: IEmscriptenFSNode | IEmscriptenStream,
+  ): IEmscriptenFSNode {
+    if (instanceOfStream(nodeOrStream)) {
+      return nodeOrStream.node;
+    }
+    return nodeOrStream;
+  }
+
+  getattr(value: IEmscriptenFSNode | IEmscriptenStream): IStats {
+    const node = this.node(value);
     return {
       ...this.fs.API.getattr(this.fs.realPath(node)),
       mode: node.mode,
@@ -210,7 +281,8 @@ export class DriveFSEmscriptenNodeOps implements IEmscriptenNodeOps {
     };
   }
 
-  setattr(node: IEmscriptenFSNode, attr: IStats): void {
+  setattr(value: IEmscriptenFSNode | IEmscriptenStream, attr: IStats): void {
+    const node = this.node(value);
     for (const [key, value] of Object.entries(attr)) {
       switch (key) {
         case 'mode':
@@ -219,6 +291,26 @@ export class DriveFSEmscriptenNodeOps implements IEmscriptenNodeOps {
         case 'timestamp':
           node.timestamp = value;
           break;
+        case 'size': {
+          const size = value;
+          const path = this.fs.realPath(node);
+          if (this.fs.FS.isFile(node.mode) && size >= 0) {
+            const file = this.fs.API.get(path);
+            const oldData = file.data ? file.data : new Uint8Array();
+            if (size !== oldData.length) {
+              if (size < oldData.length) {
+                file.data = file.data.slice(0, size);
+              } else {
+                file.data = new Uint8Array(size);
+                file.data.set(oldData);
+              }
+              this.fs.API.put(path, file);
+            }
+          } else {
+            console.warn('setattr size of', size, 'on', node, 'not yet implemented');
+          }
+          break;
+        }
         default:
           console.warn('setattr', key, 'of', value, 'on', node, 'not yet implemented');
           break;
@@ -226,93 +318,85 @@ export class DriveFSEmscriptenNodeOps implements IEmscriptenNodeOps {
     }
   }
 
-  lookup(parent: IEmscriptenFSNode, name: string): IEmscriptenFSNode {
-    const path = this.fs.PATH.join2(this.fs.realPath(parent), name);
+  lookup(
+    parent: IEmscriptenFSNode | IEmscriptenStream,
+    name: string,
+  ): IEmscriptenFSNode {
+    const node = this.node(parent);
+    const path = this.fs.PATH.join2(this.fs.realPath(node), name);
     const result = this.fs.API.lookup(path);
     if (!result.ok) {
       throw this.fs.FS.genericErrors[this.fs.ERRNO_CODES['ENOENT']];
     }
-    return this.fs.createNode(parent, name, result.mode, 0);
+    return this.fs.createNode(node, name, result.mode!, 0);
   }
 
   mknod(
-    parent: IEmscriptenFSNode,
+    parent: IEmscriptenFSNode | IEmscriptenStream,
     name: string,
     mode: number,
-    dev: number
+    dev: number,
   ): IEmscriptenFSNode {
-    const path = this.fs.PATH.join2(this.fs.realPath(parent), name);
+    const node = this.node(parent);
+    const path = this.fs.PATH.join2(this.fs.realPath(node), name);
     this.fs.API.mknod(path, mode);
-    return this.fs.createNode(parent, name, mode, dev);
+    return this.fs.createNode(node, name, mode, dev);
   }
 
-  rename(oldNode: IEmscriptenFSNode, newDir: IEmscriptenFSNode, newName: string): void {
+  rename(
+    value: IEmscriptenFSNode | IEmscriptenStream,
+    newDir: IEmscriptenFSNode | IEmscriptenStream,
+    newName: string,
+  ): void {
+    const oldNode = this.node(value);
+    const newDirNode = this.node(newDir);
     this.fs.API.rename(
       oldNode.parent
         ? this.fs.PATH.join2(this.fs.realPath(oldNode.parent), oldNode.name)
         : oldNode.name,
-      this.fs.PATH.join2(this.fs.realPath(newDir), newName)
+      this.fs.PATH.join2(this.fs.realPath(newDirNode), newName),
     );
 
     // Updating the in-memory node
     oldNode.name = newName;
-    oldNode.parent = newDir;
+    oldNode.parent = newDirNode;
   }
 
-  unlink(parent: IEmscriptenFSNode, name: string): void {
-    this.fs.API.rmdir(this.fs.PATH.join2(this.fs.realPath(parent), name));
+  unlink(parent: IEmscriptenFSNode | IEmscriptenStream, name: string): void {
+    this.fs.API.rmdir(this.fs.PATH.join2(this.fs.realPath(this.node(parent)), name));
   }
 
-  rmdir(parent: IEmscriptenFSNode, name: string) {
-    this.fs.API.rmdir(this.fs.PATH.join2(this.fs.realPath(parent), name));
+  rmdir(parent: IEmscriptenFSNode | IEmscriptenStream, name: string) {
+    this.fs.API.rmdir(this.fs.PATH.join2(this.fs.realPath(this.node(parent)), name));
   }
 
-  readdir(node: IEmscriptenFSNode): string[] {
-    return this.fs.API.readdir(this.fs.realPath(node));
+  readdir(value: IEmscriptenFSNode | IEmscriptenStream): string[] {
+    return this.fs.API.readdir(this.fs.realPath(this.node(value)));
   }
 
-  symlink(parent: IEmscriptenFSNode, newName: string, oldPath: string): void {
+  symlink(
+    parent: IEmscriptenFSNode | IEmscriptenStream,
+    newName: string,
+    oldPath: string,
+  ): void {
     throw new this.fs.FS.ErrnoError(this.fs.ERRNO_CODES['EPERM']);
   }
 
-  readlink(node: IEmscriptenFSNode): string {
+  readlink(node: IEmscriptenFSNode | IEmscriptenStream): string {
     throw new this.fs.FS.ErrnoError(this.fs.ERRNO_CODES['EPERM']);
   }
 }
 
 /**
- * Wrap ServiceWorker requests for an Emscripten-compatible synchronous API.
+ * ContentsAPI base class
  */
-export class ContentsAPI {
-  constructor(
-    baseUrl: string,
-    driveName: string,
-    mountpoint: string,
-    FS: FS,
-    ERRNO_CODES: ERRNO_CODES
-  ) {
-    this._baseUrl = baseUrl;
+export abstract class ContentsAPI {
+  constructor(driveName: string, mountpoint: string, FS: FS, ERRNO_CODES: ERRNO_CODES) {
     this._driveName = driveName;
     this._mountpoint = mountpoint;
+
     this.FS = FS;
     this.ERRNO_CODES = ERRNO_CODES;
-  }
-
-  request(data: IDriveRequest): any {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', encodeURI(this.endpoint), false);
-
-    try {
-      xhr.send(JSON.stringify(data));
-    } catch (e) {
-      console.error(e);
-    }
-
-    if (xhr.status >= 400) {
-      throw new this.FS.ErrnoError(this.ERRNO_CODES['EINVAL']);
-    }
-
-    return JSON.parse(xhr.responseText);
   }
 
   lookup(path: string): DriveFS.ILookup {
@@ -320,12 +404,10 @@ export class ContentsAPI {
   }
 
   getmode(path: string): number {
-    return Number.parseInt(
-      this.request({ method: 'getmode', path: this.normalizePath(path) })
-    );
+    return this.request({ method: 'getmode', path: this.normalizePath(path) });
   }
 
-  mknod(path: string, mode: number) {
+  mknod(path: string, mode: number): null {
     return this.request({
       method: 'mknod',
       path: this.normalizePath(path),
@@ -333,7 +415,7 @@ export class ContentsAPI {
     });
   }
 
-  rename(oldPath: string, newPath: string): void {
+  rename(oldPath: string, newPath: string): null {
     return this.request({
       method: 'rename',
       path: this.normalizePath(oldPath),
@@ -351,12 +433,19 @@ export class ContentsAPI {
     return dirlist;
   }
 
-  rmdir(path: string): void {
+  rmdir(path: string): null {
     return this.request({ method: 'rmdir', path: this.normalizePath(path) });
   }
 
   get(path: string): DriveFS.IFile {
-    const response = this.request({ method: 'get', path: this.normalizePath(path) });
+    const response = this.request({
+      method: 'get',
+      path: this.normalizePath(path),
+    });
+
+    if (!response) {
+      throw new this.FS.ErrnoError(this.ERRNO_CODES['ENOENT']);
+    }
 
     const serializedContent = response.content;
     const format: 'json' | 'text' | 'base64' | null = response.format;
@@ -385,7 +474,7 @@ export class ContentsAPI {
     }
   }
 
-  put(path: string, value: DriveFS.IFile) {
+  put(path: string, value: DriveFS.IFile): null {
     switch (value.format) {
       case 'json':
       case 'text':
@@ -415,14 +504,20 @@ export class ContentsAPI {
   }
 
   getattr(path: string): IStats {
-    const stats: IStats = this.request({
+    const stats = this.request({
       method: 'getattr',
       path: this.normalizePath(path),
     });
     // Turn datetimes into proper objects
-    stats.atime = new Date(stats.atime);
-    stats.mtime = new Date(stats.mtime);
-    stats.ctime = new Date(stats.ctime);
+    if (stats.atime) {
+      stats.atime = new Date(stats.atime);
+    }
+    if (stats.mtime) {
+      stats.mtime = new Date(stats.mtime);
+    }
+    if (stats.ctime) {
+      stats.ctime = new Date(stats.ctime);
+    }
     // ensure a non-undefined size (0 isn't great, though)
     stats.size = stats.size || 0;
     return stats;
@@ -447,6 +542,48 @@ export class ContentsAPI {
     return path;
   }
 
+  abstract request<T extends TDriveMethod>(data: TDriveRequest<T>): TDriveResponse<T>;
+
+  private _driveName: string;
+  private _mountpoint: string;
+
+  protected FS: FS;
+  protected ERRNO_CODES: ERRNO_CODES;
+}
+
+/**
+ * An Emscripten-compatible synchronous Contents API using the service worker.
+ */
+export class ServiceWorkerContentsAPI extends ContentsAPI {
+  constructor(
+    baseUrl: string,
+    driveName: string,
+    mountpoint: string,
+    FS: FS,
+    ERRNO_CODES: ERRNO_CODES,
+  ) {
+    super(driveName, mountpoint, FS, ERRNO_CODES);
+
+    this._baseUrl = baseUrl;
+  }
+
+  request<T extends TDriveMethod>(data: TDriveRequest<T>): TDriveResponse<T> {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', encodeURI(this.endpoint), false);
+
+    try {
+      xhr.send(JSON.stringify(data));
+    } catch (e) {
+      console.error(e);
+    }
+
+    if (xhr.status >= 400) {
+      throw new this.FS.ErrnoError(this.ERRNO_CODES['EINVAL']);
+    }
+
+    return JSON.parse(xhr.responseText);
+  }
+
   /**
    * Get the api/drive endpoint
    */
@@ -455,10 +592,6 @@ export class ContentsAPI {
   }
 
   private _baseUrl: string;
-  private _driveName: string;
-  private _mountpoint: string;
-  private FS: FS;
-  private ERRNO_CODES: ERRNO_CODES;
 }
 
 export class DriveFS {
@@ -472,13 +605,8 @@ export class DriveFS {
     this.FS = options.FS;
     this.PATH = options.PATH;
     this.ERRNO_CODES = options.ERRNO_CODES;
-    this.API = new ContentsAPI(
-      options.baseUrl,
-      options.driveName,
-      options.mountpoint,
-      this.FS,
-      this.ERRNO_CODES
-    );
+    this.API = this.createAPI(options);
+
     this.driveName = options.driveName;
 
     this.node_ops = new DriveFSEmscriptenNodeOps(this);
@@ -488,6 +616,21 @@ export class DriveFS {
   node_ops: IEmscriptenNodeOps;
   stream_ops: IEmscriptenStreamOps;
 
+  /**
+   * Create the ContentsAPI.
+   *
+   * This is supposed to be overwritten if needed.
+   */
+  createAPI(options: DriveFS.IOptions): ContentsAPI {
+    return new ServiceWorkerContentsAPI(
+      options.baseUrl,
+      options.driveName,
+      options.mountpoint,
+      options.FS,
+      options.ERRNO_CODES,
+    );
+  }
+
   mount(mount: any): IEmscriptenFSNode {
     return this.createNode(null, mount.mountpoint, DIR_MODE | 511, 0);
   }
@@ -496,7 +639,7 @@ export class DriveFS {
     parent: IEmscriptenFSNode | null,
     name: string,
     mode: number,
-    dev: number
+    dev: number,
   ): IEmscriptenFSNode {
     const FS = this.FS;
     if (!FS.isDir(mode) && !FS.isFile(mode)) {
@@ -544,7 +687,7 @@ export namespace DriveFS {
    */
   export interface ILookup {
     ok: boolean;
-    mode: number;
+    mode?: number;
   }
 
   /**

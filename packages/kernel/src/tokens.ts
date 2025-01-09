@@ -3,11 +3,15 @@
 
 import type { Remote } from 'comlink';
 
+import { IObservableMap } from '@jupyterlab/observables';
+
 import { Kernel, KernelMessage, KernelSpec } from '@jupyterlab/services';
 
 import { Token } from '@lumino/coreutils';
 
 import { IObservableDisposable } from '@lumino/disposable';
+
+import { ISignal } from '@lumino/signaling';
 
 import { Kernels } from './kernels';
 
@@ -28,6 +32,11 @@ export const FALLBACK_KERNEL = 'javascript';
  */
 export interface IKernels {
   /**
+   * Signal emitted when the kernels map changes
+   */
+  readonly changed: ISignal<IKernels, IObservableMap.IChangedArgs<IKernel>>;
+
+  /**
    * Start a new kernel.
    *
    * @param options The kernel startup options.
@@ -42,11 +51,24 @@ export interface IKernels {
   restart: (id: string) => Promise<Kernel.IModel>;
 
   /**
+   * List the running kernels.
+   */
+  list: () => Promise<Kernel.IModel[]>;
+
+  /**
    * Shut down a kernel.
    *
    * @param id The kernel id.
    */
   shutdown: (id: string) => Promise<void>;
+
+  /**
+   * Get a kernel by id
+   *
+   * @param id The kernel id.
+   * @returns the kernel if it exists, undefined otherwise.
+   */
+  get(id: string): Promise<IKernel | undefined>;
 }
 
 /**
@@ -158,30 +180,30 @@ export interface IWorkerKernel {
   initialize(options: IWorkerKernel.IOptions): Promise<void>;
   execute(
     content: KernelMessage.IExecuteRequestMsg['content'],
-    parent: any
+    parent: any,
   ): Promise<KernelMessage.IExecuteReplyMsg['content']>;
   complete(
     content: KernelMessage.ICompleteRequestMsg['content'],
-    parent: any
+    parent: any,
   ): Promise<KernelMessage.ICompleteReplyMsg['content']>;
   inspect(
     content: KernelMessage.IInspectRequestMsg['content'],
-    parent: any
+    parent: any,
   ): Promise<KernelMessage.IInspectReplyMsg['content']>;
   isComplete(
     content: KernelMessage.IIsCompleteRequestMsg['content'],
-    parent: any
+    parent: any,
   ): Promise<KernelMessage.IIsCompleteReplyMsg['content']>;
   commInfo(
     content: KernelMessage.ICommInfoRequestMsg['content'],
-    parent: any
+    parent: any,
   ): Promise<KernelMessage.ICommInfoReplyMsg['content']>;
   commOpen(content: KernelMessage.ICommOpenMsg, parent: any): Promise<void>;
   commMsg(content: KernelMessage.ICommMsgMsg, parent: any): Promise<void>;
   commClose(content: KernelMessage.ICommCloseMsg, parent: any): Promise<void>;
   inputReply(
     content: KernelMessage.IInputReplyMsg['content'],
-    parent: any
+    parent: any,
   ): Promise<void>;
 }
 

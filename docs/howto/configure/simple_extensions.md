@@ -62,9 +62,9 @@ jupyter labextension list
 Which should return something similar to the following:
 
 ```text
-JupyterLab v3.*.*
+JupyterLab v4.*.*
 PREFIX/share/jupyter/labextensions
-        jupyterlab-tour  v3.1.4 enabled OK
+        jupyterlab-tour  v4.0.1 enabled OK
         jupyterlab-night v0.4.0 enabled OK
 ```
 
@@ -159,3 +159,8 @@ demonstrates a few [extensions](../../reference/demo.md).
 
 [#9461]: https://github.com/jupyterlab/jupyterlab/issues/9461
 [pre-built extensions]: https://jupyterlab.readthedocs.io/en/stable/user/extensions.html
+
+## Advanced extension configuration
+
+If you are looking for more options to configure extensions, check out the dedicated
+guide on [Advanced extension configuration](./advanced/extensions.md).

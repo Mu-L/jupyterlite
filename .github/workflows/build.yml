@@ -9,7 +9,7 @@ on:
       - '*'
 
 env:
-  CACHE_EPOCH: 3
+  CACHE_EPOCH: 4
 
 jobs:
   build:
@@ -18,27 +18,25 @@ jobs:
       BUILDING_IN_CI: 1
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Build dist
         uses: ./.github/actions/build-dist
 
       - name: Upload (dist)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: jupyterlite dist ${{ github.run_number }}
           path: ./dist
 
-  lint-js-test:
+  lint:
     runs-on: ubuntu-latest
-    env:
-      LINTING_IN_CI: 1
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
       - name: Cache (pip)
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: |
@@ -46,20 +44,42 @@ jobs:
           restore-keys: |
             ${{ env.CACHE_EPOCH }}-${{ runner.os }}-pip-lint-
             ${{ env.CACHE_EPOCH }}-${{ runner.os }}-pip-
-      - name: Setup pip (lint)
-        run: python3 -m pip install -r requirements-lint.txt
-      - name: Install
-        run: doit setup:js
-      - name: Test (js)
-        run: doit -n4 test:js
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements-lint.txt
+          jlpm
       - name: Lint
-        run: doit lint
+        run: jlpm lint:check
+
+  integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements-lint.txt
+          jlpm
       - name: Repo Integrity
-        run: doit repo
+        shell: bash -el {0}
+        run: |
+          doit repo:integrity:check
+
+  typedoc:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements-build.txt
+          jlpm
       - name: Docs (typedoc)
         run: doit -n4 docs:typedoc:mystify
       - name: Upload (typedoc)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: jupyterlite typedoc ${{ github.run_number }}
           path: ./docs/reference/api/ts
@@ -74,7 +94,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu, windows, macos]
-        python-version: ['3.8', '3.11', 'pypy-3.8']
+        python-version: ['3.9', '3.13', 'pypy-3.9']
         include:
           # OS-specifics for running pip
           - os: ubuntu
@@ -87,32 +107,32 @@ jobs:
             pip-cache: ~\AppData\Local\pip\Cache
             python-command: python
           # python-specifics for tests
-          - python-version: '3.8'
+          - python-version: '3.9'
             pytest-args: '[]'
-          - python-version: '3.11'
+          - python-version: '3.13'
             pytest-args: '[]'
-          - python-version: 'pypy-3.8'
+          - python-version: 'pypy-3.9'
             # TODO: some instability with libarchive, might be better with pypy-3.8
             # after https://github.com/cloudpipe/cloudpickle/pull/461
             pytest-args: '["-k", "not _archive_is_"]'
         exclude:
           - os: windows
-            python-version: pypy-3.8
+            python-version: pypy-3.9
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+        uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: Setup pip (base)
         run: ${{ matrix.python-command }} -m pip install --user -U pip setuptools wheel
       - name: Download (dist)
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: jupyterlite dist ${{ github.run_number }}
           path: ./dist
       - name: Cache (pip)
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ${{ matrix.pip-cache }}
           key: |
@@ -148,11 +168,16 @@ jobs:
           jupyter lite status --debug || exit 1
       - name: Setup pip (test)
         run: ${{ matrix.python-command }} -m pip install -r requirements-test.txt
+      - name: Pin pytest for pypy
+        if: ${{ matrix.python-version == 'pypy-3.9' }}
+        run: |
+          ${{ matrix.python-command }} -m pip install "pytest<8"
+          echo 'See https://github.com/jupyterlite/jupyterlite/issues/1308' >> $GITHUB_STEP_SUMMARY
       - name: Test (py)
         run: doit test:py:*
       - name: Upload (reports)
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: |
             jupyterlite reports ${{ github.run_number }} ${{ matrix.os }} ${{ matrix.python-version }}
@@ -161,26 +186,26 @@ jobs:
             build/pytest
 
   docs:
-    needs: [build, lint-js-test]
+    needs: [build, typedoc]
     runs-on: ubuntu-latest
     env:
       DOCS_IN_CI: 1
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Download (dist)
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: jupyterlite dist ${{ github.run_number }}
           path: ./dist
       - name: Download (typedoc)
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: jupyterlite typedoc ${{ github.run_number }}
           path: ./docs/reference/api/ts
       - uses: jupyterlab/maintainer-tools/.github/actions/base-setup@v1
       - name: Cache (pip)
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: |
@@ -189,7 +214,7 @@ jobs:
             ${{ env.CACHE_EPOCH }}-${{ runner.os }}-pip-docs-
             ${{ env.CACHE_EPOCH }}-${{ runner.os }}-pip-
       - name: Cache (docs extensions)
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ./examples/.cache
           key: |
@@ -200,16 +225,14 @@ jobs:
         run: python3 -m pip install -r requirements-docs.txt
       - name: Install (py)
         run: doit dev:py:jupyterlite-core
-      - name: Build the JavaScript kernel
-        run: |
-          yarn --frozen-lockfile
-          yarn run build:js-kernel
+      - name: Install dependencies
+        run: jlpm
       - name: Docs (app)
         run: doit docs:app:build
       - name: Docs (app archive)
         run: doit docs:app:pack
       - name: Upload (docs app archive)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: jupyterlite docs archive ${{ github.run_number }}
           path: |
@@ -222,7 +245,7 @@ jobs:
         run: doit test:py:jupyterlite-core
       - name: Upload (reports)
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: |
             jupyterlite reports ${{ github.run_number }} ${{ matrix.os }} ${{ matrix.python-version }}
@@ -231,7 +254,7 @@ jobs:
             build/pytest
       - name: Upload (sphinx logs)
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: jupyterlite sphinx logs ${{ github.run_number }}
           if-no-files-found: ignore

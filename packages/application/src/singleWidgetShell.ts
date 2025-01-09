@@ -5,19 +5,19 @@ import { JupyterFrontEnd } from '@jupyterlab/application';
 
 import { DocumentRegistry } from '@jupyterlab/docregistry';
 
-import { find, IIterator, iter } from '@lumino/algorithm';
+import { find } from '@lumino/algorithm';
 
 import { Token } from '@lumino/coreutils';
 
 import { ISignal, Signal } from '@lumino/signaling';
 
-import { Panel, Widget, PanelLayout } from '@lumino/widgets';
+import { FocusTracker, Panel, Widget, PanelLayout } from '@lumino/widgets';
 
 /**
  * The single widget application shell token.
  */
 export const ISingleWidgetShell = new Token<ISingleWidgetShell>(
-  '@jupyterlite/application:ISingleWidgetShell'
+  '@jupyterlite/application:ISingleWidgetShell',
 );
 
 /**
@@ -43,7 +43,7 @@ export class SingleWidgetShell extends Widget implements JupyterFrontEnd.IShell 
   /**
    * A signal emitted when the current widget changes.
    */
-  get currentChanged(): ISignal<ISingleWidgetShell, void> {
+  get currentChanged(): ISignal<ISingleWidgetShell, FocusTracker.IChangedArgs<Widget>> {
     return this._currentChanged;
   }
 
@@ -78,16 +78,20 @@ export class SingleWidgetShell extends Widget implements JupyterFrontEnd.IShell 
   add(
     widget: Widget,
     area?: Shell.Area,
-    options?: DocumentRegistry.IOpenOptions
+    options?: DocumentRegistry.IOpenOptions,
   ): void {
     if (area === 'main' || area === undefined) {
       if (this._main.widgets.length > 0) {
         // do not add the widget if there is already one
         return;
       }
+      const previousWidget = this.currentWidget;
       this._main.addWidget(widget);
       this._main.update();
-      this._currentChanged.emit(void 0);
+      this._currentChanged.emit({
+        newValue: widget,
+        oldValue: previousWidget,
+      });
     }
   }
 
@@ -96,17 +100,18 @@ export class SingleWidgetShell extends Widget implements JupyterFrontEnd.IShell 
    *
    * @param area The area
    */
-  widgets(area: Shell.Area): IIterator<Widget> {
+  *widgets(area: Shell.Area): IterableIterator<Widget> {
     switch (area ?? 'main') {
       case 'main':
-        return iter(this._main.widgets);
+        yield* this._main.widgets;
+        break;
       default:
         throw new Error(`Invalid area: ${area}`);
     }
   }
 
   private _main: Panel;
-  private _currentChanged = new Signal<this, void>(this);
+  private _currentChanged = new Signal<this, FocusTracker.IChangedArgs<Widget>>(this);
 }
 
 /**

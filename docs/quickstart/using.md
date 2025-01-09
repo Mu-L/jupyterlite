@@ -52,10 +52,10 @@ eventually replace the classic Jupyter Notebook.
 
 ![image](https://user-images.githubusercontent.com/591645/153932638-771ca1f4-0ec0-4b77-a5d4-644748c7538e.png)
 
-### RetroLab
+### Jupyter Notebook
 
-RetroLab is a JupyterLab distribution with a retro look and feel, similar to the classic
-Jupyter Notebook.
+Jupyter Notebook is a document-centric UI for creating, editing and running Jupyter
+notebooks.
 
 ![image](https://user-images.githubusercontent.com/591645/153932487-7383ced5-003d-4752-99dc-450cc780443a.png)
 
@@ -72,15 +72,11 @@ JupyterLite Kernels implement [Jupyter Kernel Messaging][jkm] in the browser wit
 help of [`mock-socket`][mock-socket] and [WebAssembly][webassembly], without relying on
 any external infrastructure.
 
-The JupyterLite contibutors develop and maintain the following kernels:
+The JupyterLite contributors develop and maintain the following kernels:
 
 - a Python kernel based on [Pyodide][pyodide]:
   [https://github.com/jupyterlite/pyodide-kernel](https://github.com/jupyterlite/pyodide-kernel)
-- a JavaScript kernel running in a Web Worker, developed as part of the
-  `jupyterlite/jupyterlite` repository but distributed via the
-  `jupyterlite-javascript-kernel` package on PyPI
-- a Python kernel based on [Xeus Python][xeus-python]:
-  [https://github.com/jupyterlite/xeus-python-kernel](https://github.com/jupyterlite/xeus-python-kernel)
+- a Python kernel based on [Xeus Python][xeus-python]
 
 There are a few more third-party in-browser kernels also compatible with JupyterLite.
 See this [GitHub discussion][github-discussion-kernels] for more information.
