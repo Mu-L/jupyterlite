@@ -1,4 +1,5 @@
 """documentation for jupyterlite"""
+
 import datetime
 import json
 import os
@@ -28,7 +29,7 @@ sys.path += [str(ROOT / "py/jupyterlite/src")]
 # metadata
 author = APP_DATA["author"]
 project = author.replace("Contributors", "").strip()
-copyright = f"{datetime.date.today().year}, {author}"
+copyright = f"{datetime.datetime.now(tz=datetime.timezone.utc).year}, {author}"
 
 # The full version, including alpha/beta/rc tags
 release = APP_DATA["version"]
@@ -51,6 +52,7 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx_autodoc_typehints",
+    "sphinxcontrib.mermaid",
 ]
 
 autosectionlabel_prefix_document = True
@@ -60,7 +62,7 @@ suppress_warnings = ["autosectionlabel.*"]
 rediraffe_redirects = {
     "try/index": "_static/index",
     "try/lab/index": "_static/lab/index",
-    "try/retro/index": "_static/retro/tree/index",
+    "try/tree/index": "_static/tree/index",
     "try/repl/index": "_static/repl/index",
 }
 
@@ -106,22 +108,29 @@ html_logo = "_static/wordmark.svg"
 html_theme_options = {
     "github_url": APP_DATA["homepage"],
     "use_edit_page_button": True,
-    "navbar_start": ["launch.html"],
-    "navbar_center": ["navbar-logo.html", "navbar-nav.html"],
+    "navbar_start": ["navbar-logo", "version-switcher"],
     "icon_links": [
         {
             "name": "PyPI",
             "url": "https://pypi.org/project/jupyterlite",
             "icon": "fa-solid fa-box",
         },
-        {
-            "name": "GitHub",
-            "url": APP_DATA["repository"]["url"],
-            "icon": "fa-solid fa-github-square",
-        },
     ],
-    "pygment_light_style": "github-light",
-    "pygment_dark_style": "github-dark",
+    "pygments_light_style": "github-light",
+    "pygments_dark_style": "github-dark",
+    "logo": {
+        "alt_text": "JupyterLite",
+        "image_light": "_static/wordmark.svg",
+        "image_dark": "_static/wordmark-dark.svg",
+    },
+    "switcher": {
+        "json_url": "/".join(
+            ("https://jupyterlite.readthedocs.io/en", "latest", "_static/switcher.json")
+        ),
+        "version_match": os.environ.get("READTHEDOCS_VERSION", "latest"),
+    },
+    "check_switcher": False,
+    "navigation_with_keys": False,
 }
 
 html_context = {
@@ -161,9 +170,8 @@ def before_rtd_build(app: Sphinx, error):
 
 def after_build(app: Sphinx, error):
     """sphinx-jsonschema makes duplicate ids. clean them"""
-    os.environ.update(
-        JLITE_DOCS_OUT=app.builder.outdir
-    )  # <--- dodo.py already looking for this
+    # dodo.py already looking for this
+    os.environ.update(JLITE_DOCS_OUT=str(app.builder.outdir))
     do_tasks("post", RTD_POST_TASKS)
 
 

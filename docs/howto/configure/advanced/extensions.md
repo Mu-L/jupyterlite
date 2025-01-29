@@ -46,6 +46,27 @@ can disable the [`ServiceWorker`](./service-worker.md) plugin with the following
 }
 ```
 
+## Specifying extra paths to look for extensions
+
+The `jupyter-lite` CLI supports providing extra paths to look for extensions.
+
+You can specify the `--FederatedExtensionAddon.extra_labextensions_path` CLI option when
+building the site:
+
+```
+jupyter lite build --FederatedExtensionAddon.extra_labextensions_path=/path/to/extra/labextensions
+```
+
+Or in a `jupyter_lite_config.json`:
+
+```json
+{
+  "FederatedExtensionAddon": {
+    "extra_labextensions_path": ["/path/to/extra/labextensions"]
+  }
+}
+```
+
 ## Extensions for a Specific App
 
 Similar to the above, by updating `$YOUR_JUPYTERLITE/{app}/jupyter-lite.json`, the
@@ -77,7 +98,7 @@ federated extensions, as packaged on:
 
 If detected, [`libarchive-c`](https://pypi.org/project/libarchive-c) will be used for
 better performance, especially when working with archives with many/large assets,
-espcially [pyodide](../../pyodide/pyodide.md).
+especially [pyodide](../../pyodide/pyodide.md).
 
 If `libarchive-c` is not detected, Python's built-in `zipfile` and `tarfile` modules
 will be used.

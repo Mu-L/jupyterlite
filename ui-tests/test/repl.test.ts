@@ -5,9 +5,7 @@ import { test as base } from '@jupyterlab/galata';
 
 import { expect } from '@playwright/test';
 
-import { config } from './utils';
-
-// TODO: fix upstream condition so it's not specific to JupyterLab?
+// Use custom waitForApplication to wait for the REPL to be ready
 const test = base.extend({
   waitForApplication: async ({ baseURL }, use, testInfo) => {
     const waitIsReady = async (page): Promise<void> => {
@@ -17,9 +15,7 @@ const test = base.extend({
   },
 });
 
-test.use(config);
-
-test.describe('REPL Tests', () => {
+test.describe('Basic REPL Tests', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('repl/index.html?toolbar=1&kernel=javascript');
   });
@@ -40,5 +36,18 @@ test.describe('REPL Tests', () => {
     await page.theme.setLightTheme();
 
     expect(await page.theme.getTheme()).toEqual('JupyterLab Light');
+  });
+});
+
+test.describe('Populate REPL prompt', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto(
+      'repl/index.html?toolbar=1&kernel=javascript&code=console.log("hello")&code=console.log("world")&execute=0',
+    );
+  });
+
+  test('Populate prompt without executing', async ({ page }) => {
+    const imageName = 'populate-prompt.png';
+    expect(await page.screenshot()).toMatchSnapshot(imageName.toLowerCase());
   });
 });

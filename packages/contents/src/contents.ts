@@ -23,6 +23,9 @@ const DEFAULT_STORAGE_NAME = 'JupyterLite Storage';
  */
 const N_CHECKPOINTS = 5;
 
+const encoder = new TextEncoder();
+const decoder = new TextDecoder('utf-8');
+
 /**
  * A class to handle requests to /api/contents
  */
@@ -192,7 +195,7 @@ export class Contents implements IContents {
           format: 'json',
           mimetype: MIME.JSON,
           content: Private.EMPTY_NB,
-          size: JSON.stringify(Private.EMPTY_NB).length,
+          size: encoder.encode(JSON.stringify(Private.EMPTY_NB)).length,
           writable: true,
           type: 'notebook',
         };
@@ -248,7 +251,7 @@ export class Contents implements IContents {
    */
   async copy(path: string, toDir: string): Promise<IModel> {
     let name = PathExt.basename(path);
-    toDir = toDir === '' ? '' : `${toDir.slice(1)}/`;
+    toDir = toDir === '' ? '' : `${PathExt.removeSlash(toDir)}/`;
     // TODO: better handle naming collisions with existing files
     while (await this.get(`${toDir}${name}`, { content: true })) {
       const ext = PathExt.extname(name);
@@ -279,7 +282,7 @@ export class Contents implements IContents {
    */
   async get(
     path: string,
-    options?: ServerContents.IFetchOptions
+    options?: ServerContents.IFetchOptions,
   ): Promise<IModel | null> {
     // remove leading slash
     path = decodeURIComponent(path.replace(/^\//, ''));
@@ -377,7 +380,7 @@ export class Contents implements IContents {
       for (child of file.content) {
         await this.rename(
           URLExt.join(oldLocalPath, child.name),
-          URLExt.join(newLocalPath, child.name)
+          URLExt.join(newLocalPath, child.name),
         );
       }
     }
@@ -402,8 +405,8 @@ export class Contents implements IContents {
 
     // retrieve the content if it is a later chunk or the last one
     // the new content will then be appended to the existing one
-    const chunked = chunk ? chunk > 1 || chunk === -1 : false;
-    let item: IModel | null = await this.get(path, { content: chunked });
+    const appendChunk = chunk ? chunk > 1 || chunk === -1 : false;
+    let item: IModel | null = await this.get(path, { content: appendChunk });
 
     if (!item) {
       item = await this.newUntitled({ path, ext, type: 'file' });
@@ -427,41 +430,79 @@ export class Contents implements IContents {
     if (options.content && options.format === 'base64') {
       const lastChunk = chunk ? chunk === -1 : true;
 
+      const contentBinaryString = this._handleUploadChunk(
+        options.content,
+        originalContent,
+        appendChunk,
+      );
+
       if (ext === '.ipynb') {
-        const content = this._handleChunk(options.content, originalContent, chunked);
+        const content = lastChunk
+          ? JSON.parse(decoder.decode(this._binaryStringToBytes(contentBinaryString)))
+          : contentBinaryString;
         item = {
           ...item,
-          content: lastChunk ? JSON.parse(content) : content,
+          content,
           format: 'json',
           type: 'notebook',
-          size: content.length,
+          size: contentBinaryString.length,
         };
       } else if (FILE.hasFormat(ext, 'json')) {
-        const content = this._handleChunk(options.content, originalContent, chunked);
+        const content = lastChunk
+          ? JSON.parse(decoder.decode(this._binaryStringToBytes(contentBinaryString)))
+          : contentBinaryString;
         item = {
           ...item,
-          content: lastChunk ? JSON.parse(content) : content,
+          content,
           format: 'json',
           type: 'file',
-          size: content.length,
+          size: contentBinaryString.length,
         };
       } else if (FILE.hasFormat(ext, 'text')) {
-        const content = this._handleChunk(options.content, originalContent, chunked);
+        const content = lastChunk
+          ? decoder.decode(this._binaryStringToBytes(contentBinaryString))
+          : contentBinaryString;
         item = {
           ...item,
           content,
           format: 'text',
           type: 'file',
-          size: content.length,
+          size: contentBinaryString.length,
         };
       } else {
-        const content = options.content;
+        const content = lastChunk ? btoa(contentBinaryString) : contentBinaryString;
         item = {
           ...item,
           content,
-          size: atob(content).length,
+          format: 'base64',
+          type: 'file',
+          size: contentBinaryString.length,
         };
       }
+    }
+
+    // fixup content sizes if necessary
+    if (item.content) {
+      switch (options.format) {
+        case 'json': {
+          item = { ...item, size: encoder.encode(JSON.stringify(item.content)).length };
+          break;
+        }
+        case 'text': {
+          item = { ...item, size: encoder.encode(item.content).length };
+          break;
+        }
+        // base64 save was already handled above
+        case 'base64': {
+          break;
+        }
+        default: {
+          item = { ...item, size: 0 };
+          break;
+        }
+      }
+    } else {
+      item = { ...item, size: 0 };
     }
 
     await (await this.storage).setItem(path, item);
@@ -480,7 +521,7 @@ export class Contents implements IContents {
     path = decodeURIComponent(path);
     const slashed = `${path}/`;
     const toDelete = (await (await this.storage).keys()).filter(
-      (key) => key === path || key.startsWith(slashed)
+      (key) => key === path || key.startsWith(slashed),
     );
     await Promise.all(toDelete.map(this.forgetPath, this));
   }
@@ -513,7 +554,7 @@ export class Contents implements IContents {
       throw Error(`Could not find file with path ${path}`);
     }
     const copies = (((await checkpoints.getItem(path)) as IModel[]) ?? []).filter(
-      Boolean
+      Boolean,
     );
     copies.push(item);
     // keep only a certain amount of checkpoints per file
@@ -540,7 +581,7 @@ export class Contents implements IContents {
 
   protected normalizeCheckpoint(
     model: IModel,
-    id: number
+    id: number,
   ): ServerContents.ICheckpointModel {
     return { id: id.toString(), last_modified: model.last_modified };
   }
@@ -578,21 +619,40 @@ export class Contents implements IContents {
   }
 
   /**
-   * Handle a chunk of a file.
-   * Decode and unescape a base64-encoded string.
-   * @param content the content to process
+   * Handle an upload chunk for a file.
+   * each chunk is base64 encoded, so we need to decode it and append it to the
+   * original content.
+   * @param newContent the new content to process, base64 encoded
+   * @param originalContent the original content, must be null or a binary string if chunked is true
+   * @param appendChunk whether the chunk should be appended to the originalContent
    *
-   * @returns the decoded string, appended to the original content if chunked
+   *
+   * @returns the decoded binary string, appended to the original content if requested
    * /
    */
-  private _handleChunk(
+  private _handleUploadChunk(
     newContent: string,
-    originalContent: string,
-    chunked?: boolean
+    originalContent: any,
+    appendChunk: boolean,
   ): string {
-    const escaped = decodeURIComponent(escape(atob(newContent)));
-    const content = chunked ? originalContent + escaped : escaped;
-    return content;
+    const newContentBinaryString = atob(newContent);
+    const contentBinaryString = appendChunk
+      ? originalContent + newContentBinaryString
+      : newContentBinaryString;
+    return contentBinaryString;
+  }
+
+  /**
+   * Convert a binary string to an Uint8Array
+   * @param binaryString the binary string
+   * @returns the bytes of the binary string
+   */
+  private _binaryStringToBytes(binaryString: string): Uint8Array {
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
   }
 
   /**
@@ -645,7 +705,7 @@ export class Contents implements IContents {
    */
   private async _getServerContents(
     path: string,
-    options?: ServerContents.IFetchOptions
+    options?: ServerContents.IFetchOptions,
   ): Promise<IModel | null> {
     const name = PathExt.basename(path);
     const parentContents = await this._getServerDirectory(URLExt.join(path, '..'));
@@ -691,7 +751,7 @@ export class Contents implements IContents {
             content: JSON.parse(contentText),
             format: 'json',
             mimetype: model.mimetype || MIME.JSON,
-            size: contentText.length,
+            size: encoder.encode(contentText).length,
           };
         } else if (FILE.hasFormat(ext, 'text') || mimetype.indexOf('text') !== -1) {
           const contentText = await response.text();
@@ -700,17 +760,17 @@ export class Contents implements IContents {
             content: contentText,
             format: 'text',
             mimetype: mimetype || MIME.PLAIN_TEXT,
-            size: contentText.length,
+            size: encoder.encode(contentText).length,
           };
         } else {
-          const contentBytes = await response.arrayBuffer();
-          const contentBuffer = new Uint8Array(contentBytes);
+          const contentBuffer = await response.arrayBuffer();
+          const contentBytes = new Uint8Array(contentBuffer);
           model = {
             ...model,
-            content: btoa(contentBuffer.reduce(this.reduceBytesToString, '')),
+            content: btoa(contentBytes.reduce(this.reduceBytesToString, '')),
             format: 'base64',
             mimetype: mimetype || MIME.OCTET_STREAM,
-            size: contentBuffer.length,
+            size: contentBytes.length,
           };
         }
       }
@@ -742,7 +802,7 @@ export class Contents implements IContents {
         PageConfig.getBaseUrl(),
         'api/contents',
         path,
-        'all.json'
+        'all.json',
       );
 
       try {
@@ -754,7 +814,7 @@ export class Contents implements IContents {
       } catch (err) {
         console.warn(
           `don't worry, about ${err}... nothing's broken. If there had been a
-          file at ${apiURL}, you might see some more files.`
+          file at ${apiURL}, you might see some more files.`,
         );
       }
       this._serverContents.set(path, content);
@@ -812,7 +872,7 @@ namespace Private {
     metadata: {
       orig_nbformat: 4,
     },
-    nbformat_minor: 4,
+    nbformat_minor: 5,
     nbformat: 4,
     cells: [],
   };

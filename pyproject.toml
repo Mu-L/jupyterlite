@@ -1,18 +1,13 @@
 [project]
 name = "jupyterlite-root"
-version = "0.1.0"
-
-[tool.isort]
-profile = "black"
-multi_line_output = 3
-known_first_party = [ "jupyterlite_core", "jupyterlite",]
+version = "0.6.0a0"
 
 [tool.jupyter-releaser]
-skip = [ "build-python", "check-links", "check-manifest",]
+skip = [ "build-python", "check-links", "check-python",]
 
 [tool.jupyter-releaser.hooks]
-before-bump-version = [ "yarn", "python -m pip install jupyter-releaser -r requirements-build.txt -r requirements-lint.txt",]
-after-bump-version = [ "doit repo:integrity", "doit lint", "yarn",]
+before-bump-version = [ "python -m pip install jupyter-releaser -r requirements-build.txt -r requirements-lint.txt", "jlpm", ]
+after-bump-version = [ "doit repo:integrity", "jlpm lint", "jlpm",]
 before-build-npm = [ "doit build",]
 after-check-npm = [ "doit dist", "rm dist/jupyterlite-app-*.tgz",]
 
@@ -22,8 +17,54 @@ version-cmd = "python scripts/bump-version.py --force"
 [tool.check-wheel-contents]
 ignore = ["W002"]
 
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+extend-include = ["*.ipynb"]
+
+[tool.ruff.lint]
+exclude = ["*.ipynb"]
+select = [
+  "A", "B", "C", "DTZ", "E", "EM", "F", "FBT", "I", "ICN", "N",
+  "PLC", "PLE", "PLR", "PLW", "Q", "RUF", "S", "SIM", "T", "TID", "UP",
+  "W", "YTT",
+]
+ignore = [
+# EM101 [*] Exception must not use a string literal, assign to variable first
+# EM102 [*] Exception must not use an f-string literal, assign to variable first
+"EM101", "EM102",
+# FBT001 Boolean positional arg in function definition
+"FBT001", "FBT002", "FBT003",
+# S101 Use of `assert` detected
+"S101",
+# T201 `print` found
+"T201",
+# T203 `print` found
+"T203",
+# C408 Unnecessary `dict` call (rewrite as a literal)
+"C408", "C416",
+# RUF012 Mutable class attributes should be annotated with `typing.ClassVar`
+"RUF012",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# A001 Variable `copyright` is shadowing a Python builtin
+# S603 `subprocess` call: check for execution of untrusted input
+# S607 Starting a process with a partial executable path
+"docs/conf.py" = ["A001", "S603", "S607"]
+"**/conftest.py" = ["S603", "S607"]
+
+# TID252 [*] Relative imports from parent modules are banned
+"py/*" = ["TID252"]
+
+# S101 Use of `assert` detected
+"**/tests/*" = ["S101", "PLR2004"]
+
+# E501 Line too long
+"ui-tests/build.py" = ["E501", "S602"]
+
 [tool.tbump.version]
-current = "0.1.0"
+current = "0.6.0a0"
 regex = '''
   (?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)
   ((?P<channel>a|b|rc|.dev)(?P<release>\d+))?
@@ -35,6 +76,7 @@ tag_template = "v{new_version}"
 
 [[tool.tbump.file]]
 src = "package.json"
+search = "\"version\": \"{current_version}\""
 
 [[tool.tbump.file]]
 src = "pyproject.toml"
@@ -43,10 +85,11 @@ src = "pyproject.toml"
 src = "py/jupyterlite/jupyterlite/__init__.py"
 
 [[tool.tbump.file]]
-src = "py/jupyterlite-core/jupyterlite_core/__init__.py"
+src = "py/jupyterlite/pyproject.toml"
+search = "jupyterlite-core >={current_version}"
 
 [[tool.tbump.file]]
-src = "py/jupyterlite-javascript-kernel/pyproject.toml"
+src = "py/jupyterlite-core/jupyterlite_core/__init__.py"
 
 [[tool.tbump.field]]
 name = "channel"

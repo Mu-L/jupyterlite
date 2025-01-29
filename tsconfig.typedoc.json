@@ -22,9 +22,6 @@
       "path": "./packages/iframe-extension"
     },
     {
-      "path": "./packages/javascript-kernel"
-    },
-    {
       "path": "./packages/kernel"
     },
     {
@@ -34,10 +31,10 @@
       "path": "./packages/localforage"
     },
     {
-      "path": "./packages/repl-extension"
+      "path": "./packages/notebook-application-extension"
     },
     {
-      "path": "./packages/retro-application-extension"
+      "path": "./packages/repl-extension"
     },
     {
       "path": "./packages/server"

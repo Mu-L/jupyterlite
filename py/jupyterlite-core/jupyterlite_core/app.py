@@ -1,4 +1,5 @@
 """the JupyterLite CLI App(s)"""
+
 import typing
 from pathlib import Path
 
@@ -54,7 +55,6 @@ lite_aliases = dict(
         "extra-ignore-contents": "LiteBuildConfig.extra_ignore_contents",
         # settings
         "settings-overrides": "LiteBuildConfig.settings_overrides",
-        "mathjax-dir": "LiteBuildConfig.mathjax_dir",
         # output options
         "output-dir": "LiteBuildConfig.output_dir",
         "output-archive": "LiteBuildConfig.output_archive",
@@ -81,9 +81,9 @@ class BaseLiteApp(JupyterApp, LiteBuildConfig, DescribedMixin):
 
     config_file_name = Unicode("jupyter_lite_config").tag(config=True)
 
-    config_file_paths = List(
-        Unicode(help="Paths to search for jupyter_lite.(py|json)")
-    ).tag(config=True)
+    config_file_paths = List(Unicode(help="Paths to search for jupyter_lite.(py|json)")).tag(
+        config=True
+    )
 
     @property
     def aliases(self):
@@ -97,7 +97,7 @@ class BaseLiteApp(JupyterApp, LiteBuildConfig, DescribedMixin):
 
     @default("config_file_paths")
     def _config_file_paths_default(self):
-        return [str(Path.cwd())] + jupyter_config_path()
+        return [str(Path.cwd()), *jupyter_config_path()]
 
     def emit_alias_help(self):  # pragma: no cover
         """Yield the lines for alias part of the help.
@@ -123,31 +123,28 @@ class BaseLiteApp(JupyterApp, LiteBuildConfig, DescribedMixin):
         for alias, longname in self.aliases.items():
             try:
                 if isinstance(longname, tuple):
-                    longname, fhelp = longname
+                    name, fhelp = longname
                 else:
-                    fhelp = None
-                classname, traitname = longname.split(".")[-2:]
-                longname = classname + "." + traitname
+                    name, fhelp = longname, None
+                classname, traitname = name.split(".")[-2:]
+                name = classname + "." + traitname
 
                 cls = classdict[classname]
 
                 trait = cls.class_traits(config=True)[traitname]
                 fhelp = cls.class_get_trait_help(trait, helptext=fhelp).splitlines()
 
-                if not isinstance(alias, tuple):
-                    alias = (alias,)
-                alias = sorted(alias, key=len)  # type:ignore[assignment]
-                alias = ", ".join(("--%s" if len(m) > 1 else "-%s") % m for m in alias)
+                aliases = (alias,) if not isinstance(alias, tuple) else alias
+                aliases = sorted(aliases, key=len)  # type:ignore[assignment]
+                aliases = ", ".join(("--%s" if len(m) > 1 else "-%s") % m for m in aliases)
 
                 # reformat first line
                 assert fhelp is not None
-                fhelp[0] = fhelp[0].replace("--" + longname, alias)  # type:ignore
+                fhelp[0] = fhelp[0].replace(f"--{name}", f"--{alias}")  # type:ignore
                 yield from fhelp
-                yield indent("Equivalent to: [--%s]" % longname)
+                yield indent(f"Equivalent to: [--{name}]")
             except Exception as ex:
-                self.log.error(
-                    "Failed collecting help-message for alias %r, due to: %s", alias, ex
-                )
+                self.log.error("Failed collecting help-message for alias %r, due to: %s", alias, ex)
                 raise
 
 
@@ -157,7 +154,7 @@ class ManagedApp(BaseLiteApp):
     lite_manager = Instance(LiteManager)
 
     @default("lite_manager")
-    def _default_manager(self):
+    def _default_manager(self):  # noqa: C901, PLR0912
         kwargs = dict(
             parent=self,
         )
@@ -169,8 +166,6 @@ class ManagedApp(BaseLiteApp):
             kwargs["no_libarchive"] = self.no_libarchive
         if self.output_dir:
             kwargs["output_dir"] = self.output_dir
-        if self.mathjax_dir:
-            kwargs["mathjax_dir"] = self.mathjax_dir
         if self.file_types:
             kwargs["file_types"] = self.file_types
         if self.extra_file_types:
@@ -245,9 +240,9 @@ class LiteListApp(LiteDoitApp):
 class LiteTaskApp(LiteDoitApp):
     """run a doit task, optionally with --force"""
 
-    force = Bool(
-        False, help="forget previous runs of task and re-run from the beginning"
-    ).tag(config=True)
+    force = Bool(False, help="forget previous runs of task and re-run from the beginning").tag(
+        config=True
+    )
 
     @property
     def flags(self):

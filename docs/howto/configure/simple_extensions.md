@@ -17,7 +17,7 @@ The easiest way to add new extensions is to use the JupyterLite CLI in a Python
 environment where extensions have already been installed.
 
 You can choose the tool of your choice to manage these dependencies, such as `pip`,
-`conda` or `mamba`. For `conda` and `mamba` there are typically defined in
+`conda` or `mamba`. For `conda` and `mamba` they are typically defined in
 `environment.yml`, and in `requirements.txt` for `pip`.
 
 If you want to build a JupyterLite website locally on your machine, it is preferable to
@@ -46,8 +46,8 @@ jupyterlab-tour
 jupyterlab-night
 ```
 
-This file defines list two extensions, one of them is a theme. Run the following command
-to install them:
+This file lists two extensions, one of them is a theme. Run the following command to
+install them:
 
 ```bash
 python -m pip install -r requirements.txt
@@ -62,9 +62,9 @@ jupyter labextension list
 Which should return something similar to the following:
 
 ```text
-JupyterLab v3.*.*
+JupyterLab v4.*.*
 PREFIX/share/jupyter/labextensions
-        jupyterlab-tour  v3.1.4 enabled OK
+        jupyterlab-tour  v4.0.1 enabled OK
         jupyterlab-night v0.4.0 enabled OK
 ```
 
@@ -159,3 +159,8 @@ demonstrates a few [extensions](../../reference/demo.md).
 
 [#9461]: https://github.com/jupyterlab/jupyterlab/issues/9461
 [pre-built extensions]: https://jupyterlab.readthedocs.io/en/stable/user/extensions.html
+
+## Advanced extension configuration
+
+If you are looking for more options to configure extensions, check out the dedicated
+guide on [Advanced extension configuration](./advanced/extensions.md).

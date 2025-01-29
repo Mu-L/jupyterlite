@@ -3,7 +3,6 @@
 
 # Heavily inspired by:
 # - https://github.com/jupyterlab/jupyterlab/blob/master/buildutils/src/bumpversion.ts
-# - https://github.com/jupyterlab/retrolab/blob/main/buildutils/src/release-bump.ts
 # - https://github.com/voila-dashboards/voila/blob/master/scripts/bump-version.py
 
 import json
@@ -34,18 +33,16 @@ def bump(force, spec):
     # read the new app version
     app_json = json.loads(ROOT_PACKAGE_JSON.read_text(**ENC))
     py_version = app_json["version"]
-    js_version = (
-        py_version.replace("a", "-alpha.").replace("b", "-beta.").replace("rc", "-rc.")
-    )
+    js_version = py_version.replace("a", "-alpha.").replace("b", "-beta.").replace("rc", "-rc.")
 
     # save the new version to the app jupyter-lite.json
     jupyterlite_json = json.loads(APP_JUPYTERLITE_JSON.read_text(**ENC))
     jupyterlite_json["jupyter-config-data"]["appVersion"] = js_version
     APP_JUPYTERLITE_JSON.write_text(json.dumps(jupyterlite_json), **ENC)
-    run(f"yarn prettier --write {APP_JUPYTERLITE_JSON}")
+    run(f"jlpm prettier --write {APP_JUPYTERLITE_JSON}")
 
     # bump the JS packages
-    cmd = f"yarn run lerna version --force-publish --no-push --no-git-tag-version {js_version}"
+    cmd = f"jlpm run lerna version --force-publish --no-push --no-git-tag-version {js_version}"
     if force:
         cmd += " --yes"
     run(cmd)

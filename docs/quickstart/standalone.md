@@ -44,7 +44,7 @@ jupyter lite init
 ```
 
 By default the JupyterLite website will be placed in the `_output` folder. You can
-specific a different with `--output-dir` parameter. For instance:
+specify a different one with the `--output-dir` parameter. For instance:
 
 ```bash
 jupyter lite build --output-dir dist
@@ -133,7 +133,7 @@ however, that `http-server` does not support the `application/wasm` MIME type.
 
 ## Using a release archive
 
-As an alternative to using the `jupyterlite` CLI, you can also download a release
+As an alternative to using the `jupyter-lite` CLI, you can also download a release
 archive from the [GitHub Releases][releases] page.
 
 Download it an extract it, then use one of the approaches mentioned above to start the

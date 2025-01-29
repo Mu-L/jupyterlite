@@ -20,9 +20,9 @@ git clone https://github.com/jupyterlite/jupyterlite
 You'll need:
 
 - `git`
-- `nodejs >=18,<19`
-- `yarn <2`
-- `python >=3.10,<3.11`
+- `nodejs >=20,<21`
+- `jupyterlab >=4.4.0a2,<4.5`
+- `python >=3.12,<3.13`
 
 Various package managers on different operating systems provide these.
 
@@ -63,24 +63,16 @@ To see all of the _tasks_ available, use the `list` action:
 doit list --all --status
 ```
 
-To get information about a specific _task_, use the info `info` _action_ with the _task_
-name from the first column of `list`:
-
-```bash
-doit info build:js:app:retro
-```
-
 #### Task and Action Defaults
 
 The default `doit` _action_ is `run` which... runs the named _tasks_.
 
-The default tasks are `lint`, `build` and `docs:app:build`, so the following are
-equivalent:
+The default tasks are `build` and `docs:app:build`, so the following are equivalent:
 
 ```bash
 doit
-doit lint build docs:app:build
-doit run lint build docs:app:build
+doit build docs:app:build
+doit run build docs:app:build
 ```
 
 ```{note}
@@ -108,9 +100,12 @@ These offer different assets and tools, and obey different environment variables
 
 The JupyterLite core JS development workflow builds:
 
-- a ready-to-serve, empty website with:
-  - a `lab/index.html` and supporting assets
-  - a `retro/*/index.html` and supporting assets (for `tree`, `editor`, etc.)
+- multiple apps for each of the `notebook`, `lab`, and `repl` frontends
+  - the entrypoint for each app is located under `{appName}/index.html`. For example:
+    - `lab/index.html`: opens the JupyterLab interface
+    - `notebooks/index.html?path=example.ipynb`: opens the notebook interface with the
+      `example.ipynb` notebook
+    - `tree/index.html`: opens the file browser via the Jupyter Notebook interface
   - common configuration tools
 - `typedoc` documentation
 - > _TBD: a set of component tarballs distributed on `npmjs.com`. See [#7]._
@@ -133,13 +128,13 @@ While most of the scripts below will be run (in the correct order based on chang
 Most of the [development tasks](#development-tasks) can be run with one command:
 
 ```bash
-yarn bootstrap
+jlpm bootstrap
 ```
 
 #### Install JavaScript Dependencies
 
 ```bash
-yarn
+jlpm
 ```
 
 #### Build Apps
@@ -147,13 +142,13 @@ yarn
 To build development assets:
 
 ```bash
-yarn build
+jlpm build
 ```
 
 To build production assets:
 
 ```bash
-yarn build:prod
+jlpm build:prod
 ```
 
 #### Serve Apps
@@ -165,7 +160,7 @@ To serve with `scripts/serve.js`, based on Node.js's
 [`http`](https://nodejs.org/api/http.html) module:
 
 ```bash
-yarn serve
+jlpm serve
 ```
 
 To serve with Python's built-in
@@ -173,27 +168,38 @@ To serve with Python's built-in
 Python 3.7+):
 
 ```bash
-yarn serve:py
+jlpm serve:py
 ```
 
 #### Watch Sources
 
 ```bash
-yarn watch
+jlpm watch
 ```
 
 #### Lint/Format Sources
 
 ```bash
-yarn lint
+jlpm lint
 ```
 
 #### Run Unit Tests
 
 ```bash
-yarn build:test
-yarn test
+jlpm build:test
+jlpm test
 ```
+
+#### Installing other kernels
+
+By default this repository only includes the JavaScript kernel.
+
+If you would like to setup a local environment with an additional, you can install
+explicitely, before running the `jupyter lite build` command. For example:
+
+- To install the Pyodide kernel: `pip install jupyterlite-pyodide-kernel`
+- To install the Xeus Python kernel:
+  https://jupyterlite-xeus.readthedocs.io/en/latest/environment.html
 
 ### UI Tests
 
@@ -210,7 +216,7 @@ First install the dependencies:
 
 ```sh
 cd ui-tests
-yarn install
+jlpm install
 ```
 
 The UI tests use a custom JupyterLite website:
@@ -219,18 +225,18 @@ The UI tests use a custom JupyterLite website:
 # in ui-tests directory
 
 # build
-yarn build
+jlpm build
 ```
 
 Then run the `test` script:
 
 ```sh
 # in the ui-tests directory
-yarn test
+jlpm test
 ```
 
 You can pass additional arguments to `playwright` by appending parameters to the
-command. For example to run the test in headed mode, `yarn test --headed`.
+command. For example to run the test in headed mode, `jlpm test --headed`.
 
 Checkout the [Playwright Command Line Reference](https://playwright.dev/docs/test-cli/)
 for more information about the available command line options.
@@ -250,7 +256,7 @@ your development environment, with a reference snapshots generated in your dev
 environment. You can generate new reference snapshots by running the following command:
 
 ```bash
-yarn test:update
+jlpm test:update
 ```
 
 To update the snapshots:
@@ -263,13 +269,39 @@ To update the snapshots:
 - copy the `-snapshots` directories to replace the existing ones
 - commit and push the changes
 
+Alternatively, you can also post a comment on the PR with the following content:
+
+```
+bot please update playwright snapshots
+```
+
+The bot should react to the comment by leaving a 👍 reaction, and trigger the snapshot
+update in a background GitHub Action run.
+
 The generated snapshots can be found on the Summary page of the CI check:
 
 ![reference-snapshots](https://user-images.githubusercontent.com/591645/141300086-d13c3221-a66d-45f5-b0ac-6f4795b16349.png)
 
+#### Troubleshooting UI tests
+
+The UI tests have the Playwright `trace` option enabled which is useful to have a more
+in-depth look at failing tests on CI, including console errors and network calls.
+
+To view the trace:
+
+1. download the Playwright report from the GitHub Actions artifacts
+2. start a web server (for example with `python -m http.server`) and open the report in
+   a browser
+3. navigate to the failing test
+4. scroll to the "Trace" section of the test to open the trace in a new tab
+
+![a screenshot showing the Playwright trace](https://github.com/jupyterlite/jupyterlite/assets/591645/76485f0e-0bc8-4d8e-9584-7e5f185c96cd)
+
+For more information: https://playwright.dev/docs/trace-viewer
+
 ### (Server) Python Development
 
-After all the `yarn`-related work has finished, the terminal-compatible python uses the
+After all the `jlpm`-related work has finished, the terminal-compatible python uses the
 `npm`-compatible tarball of `app` to build new sites combined with **original user
 content**.
 

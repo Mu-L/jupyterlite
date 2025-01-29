@@ -12,6 +12,11 @@ const CACHE = 'precache';
 const broadcast = new BroadcastChannel('/api/drive.v1');
 
 /**
+ * Whether to enable the cache
+ */
+let enableCache = false;
+
+/**
  * Install event listeners
  */
 self.addEventListener('install', onInstall);
@@ -32,6 +37,9 @@ function onInstall(event: ExtendableEvent): void {
  * Handle activation.
  */
 function onActivate(event: ExtendableEvent): void {
+  // check if we should enable the cache
+  const searchParams = new URL(location.href).searchParams;
+  enableCache = searchParams.get('enableCache') === 'true';
   event.waitUntil(self.clients.claim());
 }
 
@@ -42,9 +50,12 @@ async function onFetch(event: FetchEvent): Promise<void> {
   const { request } = event;
 
   const url = new URL(event.request.url);
+  if (url.pathname === '/api/service-worker-heartbeat') {
+    event.respondWith(new Response('ok'));
+    return;
+  }
 
   let responsePromise: Promise<Response> | null = null;
-
   if (shouldBroadcast(url)) {
     responsePromise = broadcastOne(request);
   } else if (!shouldDrop(request, url)) {
@@ -61,6 +72,10 @@ async function onFetch(event: FetchEvent): Promise<void> {
 /** Get a cached response, and update cache. */
 async function maybeFromCache(event: FetchEvent): Promise<Response> {
   const { request } = event;
+
+  if (!enableCache) {
+    return await fetch(request);
+  }
 
   let response: Response | null = await fromCache(request);
 
@@ -126,7 +141,12 @@ async function broadcastOne(request: Request): Promise<Response> {
     };
   });
 
-  broadcast.postMessage(await request.json());
+  const message = await request.json();
+  // Mark message as being for broadcast.ts
+  // This makes sure we won't get problems with messages
+  // across tabs with multiple notebook tabs open
+  message.receiver = 'broadcast.ts';
+  broadcast.postMessage(message);
 
   return await promise;
 }

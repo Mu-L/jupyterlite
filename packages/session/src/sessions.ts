@@ -21,6 +21,41 @@ export class Sessions implements ISessions {
    */
   constructor(options: Sessions.IOptions) {
     this._kernels = options.kernels;
+    // Listen for kernel removals
+    this._kernels.changed.connect((_, args) => {
+      switch (args.type) {
+        case 'remove': {
+          const kernelId = args.oldValue?.id;
+          if (!kernelId) {
+            return;
+          }
+          // find the session associated with the kernel
+          const session = this._sessions.find((s) => s.kernel?.id === kernelId);
+          if (!session) {
+            return;
+          }
+          // Track the kernel ID for restart detection
+          this._pendingRestarts.add(kernelId);
+          setTimeout(async () => {
+            // If after a short delay the kernel hasn't been re-added, it was terminated
+            if (this._pendingRestarts.has(kernelId)) {
+              this._pendingRestarts.delete(kernelId);
+              await this.shutdown(session.id);
+            }
+          }, 100);
+          break;
+        }
+        case 'add': {
+          // If this was a restart, remove it from pending
+          const kernelId = args.newValue?.id;
+          if (!kernelId) {
+            return;
+          }
+          this._pendingRestarts.delete(kernelId);
+          break;
+        }
+      }
+    });
   }
 
   /**
@@ -44,7 +79,7 @@ export class Sessions implements ISessions {
   }
 
   /**
-   * Path an existing session.
+   * Patch an existing session.
    * This can be used to rename a session.
    *
    * - path updates session to track renamed paths
@@ -69,7 +104,7 @@ export class Sessions implements ISessions {
       // Kernel id takes precedence over name.
       if (kernel.id) {
         const session = this._sessions.find(
-          (session) => session.kernel?.id === kernel?.id
+          (session) => session.kernel?.id === kernel?.id,
         );
         if (session) {
           patched.kernel = session.kernel;
@@ -84,6 +119,12 @@ export class Sessions implements ISessions {
         if (newKernel) {
           patched.kernel = newKernel;
         }
+
+        // clean up the session on kernel shutdown
+        void this._handleKernelShutdown({
+          kernelId: newKernel.id,
+          sessionId: session.id,
+        });
       }
     }
 
@@ -105,10 +146,16 @@ export class Sessions implements ISessions {
     }
     const kernelName = options.kernel?.name ?? '';
     const id = options.id ?? UUID.uuid4();
+    const nameOrPath = options.name ?? options.path;
+    const dirname = PathExt.dirname(options.name) || PathExt.dirname(options.path);
+    const hasDrive = nameOrPath.includes(':');
+    const driveName = hasDrive ? nameOrPath.split(':')[0] : '';
+    // add drive name if missing (top level directory)
+    const location = dirname.includes(driveName) ? dirname : `${driveName}:${dirname}`;
     const kernel = await this._kernels.startNew({
       id,
       name: kernelName,
-      location: PathExt.dirname(options.path),
+      location,
     });
     const session: Session.IModel = {
       id,
@@ -121,6 +168,10 @@ export class Sessions implements ISessions {
       },
     };
     this._sessions.push(session);
+
+    // clean up the session on kernel shutdown
+    void this._handleKernelShutdown({ kernelId: id, sessionId: session.id });
+
     return session;
   }
 
@@ -141,9 +192,22 @@ export class Sessions implements ISessions {
     ArrayExt.removeFirstOf(this._sessions, session);
   }
 
+  /**
+   * Handle kernel shutdown
+   */
+  private async _handleKernelShutdown({
+    kernelId,
+    sessionId,
+  }: {
+    kernelId: string;
+    sessionId: string;
+  }): Promise<void> {
+    // No need to handle kernel shutdown here anymore since we're using the changed signal
+  }
+
   private _kernels: IKernels;
-  // TODO: offload to a database
   private _sessions: Session.IModel[] = [];
+  private _pendingRestarts = new Set<string>();
 }
 
 /**

@@ -1,15 +1,59 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { ServerConnection, ServiceManager } from '@jupyterlab/services';
+import { Event, ServerConnection, ServiceManager } from '@jupyterlab/services';
 
 import { Application, IPlugin } from '@lumino/application';
+
+import { Signal, Stream } from '@lumino/signaling';
 
 import { WebSocket } from 'mock-socket';
 
 import { Router } from './router';
 
 export type JupyterLiteServerPlugin<T> = IPlugin<JupyterLiteServer, T>;
+
+/**
+ * A local event manager service.
+ *
+ * #### Notes
+ * Schema IDs are not verified and all client-emitted events emit.
+ */
+class LocalEventManager implements Event.IManager {
+  constructor(options: { serverSettings: ServerConnection.ISettings }) {
+    this._serverSettings = options.serverSettings;
+    this._stream = new Stream(this);
+  }
+
+  async emit({ data, schema_id }: Event.Request): Promise<void> {
+    this._stream.emit({ ...data, schema_id });
+  }
+
+  dispose(): void {
+    if (this.isDisposed) {
+      return;
+    }
+    this._isDisposed = true;
+    Signal.clearData(this);
+    this._stream.stop();
+  }
+
+  get isDisposed(): boolean {
+    return this._isDisposed;
+  }
+
+  get stream() {
+    return this._stream;
+  }
+
+  get serverSettings(): ServerConnection.ISettings {
+    return this._serverSettings;
+  }
+
+  private _isDisposed = false;
+  private _serverSettings: ServerConnection.ISettings;
+  private _stream: Stream<this, Event.Emission>;
+}
 
 /**
  * Server is the main application class. It is instantiated once and shared.
@@ -22,13 +66,15 @@ export class JupyterLiteServer extends Application<never> {
    */
   constructor(options: Application.IOptions<never>) {
     super(options);
+    const serverSettings = {
+      ...ServerConnection.makeSettings(),
+      WebSocket,
+      fetch: this.fetch.bind(this) ?? undefined,
+    };
     this._serviceManager = new ServiceManager({
       standby: 'never',
-      serverSettings: {
-        ...ServerConnection.makeSettings(),
-        WebSocket,
-        fetch: this.fetch.bind(this) ?? undefined,
-      },
+      serverSettings,
+      events: new LocalEventManager({ serverSettings }),
     });
   }
 
@@ -69,7 +115,7 @@ export class JupyterLiteServer extends Application<never> {
    */
   async fetch(
     req: RequestInfo,
-    init?: RequestInit | null | undefined
+    init?: RequestInit | null | undefined,
   ): Promise<Response> {
     if (!(req instanceof Request)) {
       throw Error('Request info is not a Request');
